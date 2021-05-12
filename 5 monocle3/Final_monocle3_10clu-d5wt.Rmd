@@ -1,0 +1,147 @@
+---
+title: "d5wt Monocle"
+output: html_notebook
+---
+
+```{r}
+library(Seurat)
+library(monocle3)
+library(htmlwidgets)
+```
+
+### Specifying input parameters
+
+```{r}
+date = gsub("2020-","20",Sys.Date(),perl=TRUE);
+date = gsub("-","",date)
+Dim = "2D"
+upn = "dcSubReg-20201228"
+input.dir <- getwd()
+nPC <- 15
+cluster.res <- 0.7
+output.dir <- sprintf("%s/%s.%s.Seurat.to.Monocle3.D5WT.%s", getwd(), upn, date, Dim)
+dir.create(file.path(output.dir), showWarnings = FALSE)
+```
+
+
+
+
+### Reading in Seurat object
+```{r}
+print("Readingin Seurat objects")
+d5wt <- subset(dcSubReg, subset = HTO_maxID == 'Hash3')
+```
+
+
+
+### Building the necessary parts for a basic cds
+
+# part one, gene annotations
+```{r}
+gene_annotation <- as.data.frame(rownames(d5wt@reductions[["pca"]]@feature.loadings), row.names = rownames(d5wt@reductions[["pca"]]@feature.loadings))
+colnames(gene_annotation) <- "gene_short_name"
+```
+
+# part two, cell information
+```{r}
+cell_metadata <- as.data.frame(d5wt@assays[["RNA"]]@counts@Dimnames[[2]], row.names = d5wt@assays[["RNA"]]@counts@Dimnames[[2]])
+colnames(cell_metadata) <- "barcode"
+```
+
+# part three, counts sparse matrix
+```{r}
+New_matrix <- d5wt@assays[["RNA"]]@counts
+New_matrix <- New_matrix[rownames(d5wt@reductions[["pca"]]@feature.loadings), ]
+expression_matrix <- New_matrix
+```
+
+### Construct the basic cds object
+```{r}
+cds_from_seurat <- new_cell_data_set(expression_matrix,
+                                     cell_metadata = cell_metadata,
+                                     gene_metadata = gene_annotation)
+```
+
+### Construct and assign the made up partition
+```{r}
+recreate.partition <- c(rep(1, length(cds_from_seurat@colData@rownames)))
+names(recreate.partition) <- cds_from_seurat@colData@rownames
+recreate.partition <- as.factor(recreate.partition)
+
+cds_from_seurat@clusters@listData[["UMAP"]][["partitions"]] <- recreate.partition
+```
+
+### Assign the cluster info
+```{r}
+list_cluster <- d5wt@meta.data[["seurat_clusters"]]
+names(list_cluster) <- d5wt@assays[["RNA"]]@data@Dimnames[[2]]
+
+cds_from_seurat@clusters@listData[["UMAP"]][["clusters"]] <- list_cluster
+```
+
+### Could be a space-holder, but essentially fills out louvain parameters
+```{r}
+cds_from_seurat@clusters@listData[["UMAP"]][["louvain_res"]] <- "NA"
+```
+
+### Assign UMAP coordinate
+```{r}
+cds_from_seurat@int_colData@listData$reducedDims@listData[["UMAP"]] <-d5wt@reductions[["umap"]]@cell.embeddings
+
+
+### Assign feature loading for downstream module analysis
+
+cds_from_seurat@preprocess_aux$gene_loadings <- d5wt@reductions[["pca"]]@feature.loadings
+
+
+### Learn graph, this step usually takes a significant period of time for larger samples
+
+print("Learning graph, which can take a while depends on the sample")
+
+cds_from_seurat <- learn_graph(cds_from_seurat, use_partition = T)
+```
+
+### Reading in cell type information
+```{r}
+
+print("Reading in cell type information")
+colData(cds_from_seurat)$celltype <- as.character(clusters(cds_from_seurat))
+colData(cds_from_seurat)$celltype = dplyr::recode(colData(cds_from_seurat)$celltype,
+                                                "0"="pDC", "1"="HSPC1", "2"="cDC2", "3"="monocyte", "4"="HSPC2", "5"="HSPC4", "6"="neutrophil", "7"= "HSPC3",  "8"="cDC1", "9"="mast")
+```
+
+
+
+### Plot cluster info with trajectory
+```{r}
+print("Plotting clusters")
+
+if (Dim == "2D") {
+  pdf(sprintf("%s/clusters.with.trajectory.%s.pdf", output.dir, Dim), width = 10, height = 10)
+  clus <- plot_cells(cds_from_seurat, 
+                color_cells_by = 'cluster',
+                label_groups_by_cluster=FALSE,
+                label_leaves=FALSE,
+                label_branch_points=FALSE)
+  print(clus)
+  dev.off()
+}
+
+
+```
+
+### Plot cell type info with trajectory
+```{r}
+print("Plotting cell type info")
+
+if (Dim == "2D") {
+  pdf(sprintf("%s/celltype.with.trajectory.%s.pdf", output.dir, Dim), width = 2.03, height = 1.72)
+  ctype <- plot_cells(cds_from_seurat, 
+                color_cells_by = 'celltype',
+                label_groups_by_cluster=FALSE,
+                label_leaves=FALSE,
+                label_branch_points=FALSE)
+  print(ctype)
+  dev.off()
+}
+```

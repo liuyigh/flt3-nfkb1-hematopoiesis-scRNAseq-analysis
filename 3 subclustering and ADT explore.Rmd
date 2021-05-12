@@ -1,0 +1,118 @@
+---
+title: "DC V3, subclustering and ADT"
+output: html_notebook
+---
+
+## original V4
+## See Enrichr Analysis of 56 genes
+
+
+```{r}
+library(Seurat)
+library(dplyr)
+```
+## Compare cite-seq antibody signal vs mRNA signal
+```{r}
+FeaturePlot(dc, features = c("Adt.CD11b", "Adt.CD11c", "Adt.B220", "Adt.SiglecH", "Itgam", "Itgax", "Ptprc", "Siglech"), min.cutoff = "q05", max.cutoff = "q95", ncol = 4)
+```
+## Look at Cite-seq antibody signal by clusters
+```{r}
+Idents(dc) <- "seurat_clusters"
+RidgePlot(dc, features = c("Adt.CD11b", "Adt.CD11c", "Adt.B220", "Adt.SiglecH"), ncol = 2)
+```
+
+## more
+```{r}
+RidgePlot(dc, features = c("Adt.MHCII", "Adt.Gr1", "Adt.Sirpa", "Adt.CD24", "Adt.F480"), ncol = 2)
+```
+
+## Look at Cite-seq antibody signal by sample
+
+```{r}
+Idents(dc) <- "HTO_maxID"
+FeaturePlot(dc, features = "Ptprc", split.by = "HTO_maxID", ncol = 2)
+FeaturePlot(dc, features = "Adt.B220", split.by = "HTO_maxID", ncol = 2)
+FeaturePlot(dc, features = "Adt.CD24", split.by = "HTO_maxID", ncol = 2)
+FeaturePlot(dc, features = "Adt.Sirpa", split.by = "HTO_maxID", ncol = 2)
+FeaturePlot(dc, features = "Adt.MHCII", split.by = "HTO_maxID", ncol = 2)
+FeaturePlot(dc, features = "Adt.Gr1", split.by = "HTO_maxID", ncol = 2)
+FeaturePlot(dc, features = "Adt.F480", split.by = "HTO_maxID", ncol = 2)
+FeaturePlot(dc, features = "Adt.CD11b", split.by = "HTO_maxID", ncol = 2)
+FeaturePlot(dc, features = "Adt.CD11c", split.by = "HTO_maxID", ncol = 2)
+FeaturePlot(dc, features = "Adt.SiglecH", split.by = "HTO_maxID", ncol = 2)
+```
+## Above ^^^ ADT preliminary
+
+## select only clusters related to myeloid differentiation, exclude conteminating peripheral clusters
+
+```{r}
+Idents(dc) <- "seurat_clusters"
+dcSub <- subset(dc, idents = c(0,1,3,4,6,7,8,9,10,11))
+
+dcSub <- NormalizeData(dcSub)
+dcSub <- FindVariableFeatures(dcSub, selection.method = "mean.var.plot")
+dcSub <- ScaleData(dcSub, features = VariableFeatures(dcSub))
+dcSub <- RunPCA(dcSub, features = VariableFeatures(dcSub))
+
+VizDimLoadings(dcSub, dims = 1:4, reduction = "pca")
+DimHeatmap(dcSub, dims = 1:15, cells = 500, balanced = TRUE)
+```
+
+```{r}
+ElbowPlot(dcSub, ndims = 40)
+dcSub <- JackStraw(dcSub, num.replicate = 100, dims = 50)
+dcSub <- ScoreJackStraw(dcSub, dims = 1:40)
+
+# 'Significant' PCs will show a strong enrichment of features with low p-values (solid curve above the dashed line). 
+JackStrawPlot(dcSub, dims = 1:40)
+```
+
+```{r}
+dcSub <- FindNeighbors(dcSub, reduction = "pca", dims = 1:29)
+dcSub <- RunTSNE(dcSub, reduction = "pca", dims = 1:20)
+dcSub <- RunUMAP(dcSub, dims = 1:20)
+
+FeaturePlot(dcSub, features = "nFeature_RNA", split.by = "HTO_maxID", ncol = 2)
+
+#dcSub <- FindClusters(dcSub, resolution = 0.5, verbose = FALSE) #13 clusters
+#dcSub <- FindClusters(dcSub, resolution = 0.3, verbose = FALSE) #10 clusters
+dcSub <- FindClusters(dcSub, resolution = 0.2, verbose = FALSE) #7 clusters
+DimPlot(dcSub, reduction = "tsne", split = "HTO_maxID")
+DimPlot(dcSub, split.by = "HTO_maxID") #UMAP better
+```
+
+```{r}
+clusMarkers <- FindAllMarkers(dcSub, min.pct = 0.25, logfc.threshold = 0.25)
+```
+
+Clusters: 
+=========
+use ARCHS4 Tissues and Mouse Gene Atlas on ENRichr, look at individual genes
+
+|#  |Prof|    Cell type           |Genes               |Datbase|Confidence Fold change|
+|---|--|--------------------------|--------------------|-------|-----------|
+|0  |++|HSPCs                     |Hist1h1b/Top2a(DNA) |Archs4 | poor  |
+|1  |- |DC1                       |high MHCII          |Archs4 |
+|2  |+ |?BM/CD34+/TBlast          |Hells/Ctr9/Myl10    |Archs4 | poor  |
+|3  |- |pDC                       |Siglech Ccr9 Ctsl   |Archs4 |
+|4  |+ |Neutrophil/GMP/Baso       |Elane/Mpo/Ctsg/Cd63 |GeneFunc/MAtlas |
+|5  |- |Early lymph               |Ly6d                |Archs4 |
+|6  |+ |CD8 DCs           |Ctr9/Myl10          |Archs4 | poor  |
+
+```{r}
+#Save clusMarkers into csv file
+write.csv(clusMarkers, "Sub_Markers_all_7_clusters.csv")
+ttable <- clusMarkers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_logFC)
+write.csv(ttable, "Sub_Top10_markers_all_7_clusters.csv")
+ttable <- clusMarkers %>% group_by(cluster) %>% top_n(n = 4, wt = avg_logFC)
+write.csv(ttable, "Sub_Top4_markers_all_7_clusters.csv")
+```
+
+## Regress cell cycle using alternative workflow
+```{r}
+dcSub$CC.Difference <- dcSub$S.Score - dcSub$G2M.Score
+dcCC <- ScaleData(dcSub, vars.to.regress = "CC.Difference", features = rownames(dcSub))
+```
+
+
+

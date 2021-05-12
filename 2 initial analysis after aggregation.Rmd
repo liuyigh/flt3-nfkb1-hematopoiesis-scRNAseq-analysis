@@ -1,0 +1,375 @@
+---
+title: "Further analysis"
+output: html_notebook
+---
+
+V2 After Aggr Further Explore # original v3
+
+## TO DO:
+
+* find marker genes of 16 clusters -> assign identity __Done__
+    * recluster/FinaVariables within subsest of certain progenitor clusters. aka. subclustering recommended by Theis Lab __!!!!!__
+* ADT cluster 
+    * Visualize protein levels on RNA clusters __!!!!__
+    * Identify differentially expressed proteins
+    * Cluster directly on protein levels
+* cell cycle 
+    * score hashtag count #done
+    * cell cycle regression, then find marker genes? __No need__
+    * cell counts
+    * d5 clus #4, #7, d3 clus #10
+* differentially expressed genes between hashtags in certain clusters
+    * Enrichr analysis of mkGenes
+    * Stat5a genes
+    * Seurat: "Identify differential expressed genes across conditions" __Ctse,Gm47283,Ppfia4,Slamf1__
+        * Ctse loss: 
+            * DC MHCII Ag processing, DC function project
+            * Oncomine, down regulated in AML(Haferlach et al.)
+            * Cathepsins involved in bone, TL17 differentiation
+        * Gm47283 gain:
+            * Chr Y LncRNA
+        * Ppfia4 gain:
+            * Liprin-a-4, HIF1a target gene, cell adhesion
+            * adapter to RPTP, proliferation
+            * Hypoxia marker gene, excessive erythroblast? https://www.nature.com/articles/onc2011417?draft=journal
+            * Oncomine, down in AML?
+        * Slamf1/CD150 gain:
+            * NFKB1 motif,
+            * Nfkb1 signaling https://www.genecards.org/cgi-bin/carddisp.pl?gene=SLAMF1
+            * long term culture
+        * MID1:
+            * no Oncomine
+        * __CD45.1 vs CD45.2 diff__
+        * __Nfkb1 vs WT diff__
+* trajectory inference in Scanpy __!!! not useful__
+
+## Lower priority
+* normalization batch integration??? notdone in V2 #not in mydata?
+    * standard
+    * scTransform
+
+
+## Preprocessing DONE
+
+* scrublet #done
+* Mt content #done
+* neo/snpclust, compare to hashtag
+* hashtag #integrated, manual demux
+* gene/totalRNA counts # did not filter
+* GateID #does not apply
+* Manually ID doublet, redo #done
+* CellCycleScoring #done
+* gene set scoring
+    * Pro survival genes. No big difference
+    * Pro apoptotic genes. No big difference
+    * dc diff set. No big difference
+    
+## Pipeline (done)
+* Mt content -> scrublet -> HTO_Demux (veryfy with neo/snpclust) -> gene/totalRNA counts -> cell cycle -> same to d5 -> aggregate?
+* normalize -> find variable -> scale
+
+## Ideas
+* Suggest Eason to look at surface markers
+
+* new cell types
+
+##Conclusions
+better than bulk
+better than surface?
+better than Ki67
+
+```{r}
+library(Seurat)
+library(dplyr)
+```
+
+
+
+```{r}
+## save data
+#saveRDS(dc, file = "dc.rds")
+#saveRDS(d3, file = "analysis/d3.rds")
+#saveRDS(d5, file = "analysis/d5.rds")
+```
+
+
+```{r}
+## realize no Clusters info in object dc? redo FindClusters() with various resolutions
+dc <- FindClusters(dc, resolution = 0.5, verbose = FALSE) # 16 clusters
+DimPlot(dc, split.by = "HTO_maxID")
+```
+
+```{r}
+dc <- RunUMAP(dc, dims = 1:20)
+DimPlot(dc, reduction = "umap", split = "HTO_maxID")
+```
+
+```{r}
+## count table for cell cycle scoreing per cluster, genotype and day
+
+library(dplyr)
+cccounts <- table(dc$Phase, dc$seurat_clusters)
+write.csv(cccounts, "cccounts.csv")
+```
+```{r}
+# select and explore only proliferating clusters
+dcProf <- subset(dc, idents = c(0,7,8,10,14))
+DimPlot(dcProf, reduction = "tsne", split = "HTO_maxID")
+```
+
+```{r}
+## normalized to row sum() in excel to get `cccounts-pct.tsv` percentages of cell cycle phase, header needs to be 1 item shorter for row.names to be detected
+## hierarchical clustering based on cell cycle
+cccounts.pct <- read.table("cccounts-pct.tsv", header = TRUE)
+dtest <- dist(t(cccounts.pct), method = "euclidean")
+fit <- hclust(dtest, method="ward")
+plot(fit)
+
+```
+
+```{r}
+## ggheatmap plotting
+
+## wrong packge below
+#devtools::install_github("jakobbossek/ggheatmap")
+#remove.packages("ggheatmap")
+#remove.packages("BBmisc")
+#remove.packages("checkmate")
+#remove.packages("viridis")
+
+## right packge
+## install devtools tleonardi/ggheatmap
+##devtools::install_github("tleonardi/ggheatmap")
+
+## after reinstall the right one: do: 
+## detach(package:ggheatmap)
+
+library(ggplot2)
+library(ggheatmap)
+ggheatmap(cccounts.pct, colorPalette = "PuRd")
+## all cells
+```
+
+```{r}
+## Cell cycle scoring based on cluster and sample
+
+ccCountHash <- table(dc$Phase, dc$seurat_clusters, dc$HTO_maxID)
+library(gridExtra)
+plots <- list() 
+for (i in seq(4)) {
+  plots[[i]] <- ggheatmap(as.data.frame.matrix(round(prop.table(ccCountHash[,,i], 2)*100, 1)), orderCol = F, colorPalette = "PuRd")
+}
+do.call(grid.arrange, c(plots, ncol = 2))
+
+write.csv(ccCountHash,"analysis/ccCountHash.csv" , row.names=FALSE)
+saveRDS(ccCountHash, "analysis/ccCountHash.rds")
+
+## stupid way
+ccCountHash2 <- table(dc$Phase, dc$seurat_clusters, dc$HTO_maxID)
+ccCountHash2[,,1] <- round(prop.table(ccCountHash[,,1], 2)*100, 1)
+ccCountHash2[,,2] <- round(prop.table(ccCountHash[,,2], 2)*100, 1)
+ccCountHash2[,,3] <- round(prop.table(ccCountHash[,,3], 2)*100, 1)
+ccCountHash2[,,4] <- round(prop.table(ccCountHash[,,4], 2)*100, 1)
+## or
+for (i in seq(4)) {ccCountHash2[,,i] <- round(prop.table(ccCountHash[,,i], 2)*100, 1)}
+
+## better way using prop.table() function
+ccCountHashPct <- round(prop.table(ccCountHash, c(3,2))*100, digits =1)
+saveRDS(ccCountHashPct, "ccCountHashPct.rds")
+##view table
+# ftable(ccCountHash, row.vars = 2)
+
+```
+
+```{r}
+## check batch effect, looks ok. Probably because they are sequence together
+Idents(dc) <- "HTO_maxID"
+DimPlot(dc)
+```
+
+```{r}
+FeaturePlot(dc, features = "nFeature_RNA", split.by = "HTO_maxID", ncol = 2)
+## progenitor cells have more genes and more counts "nCount_RNA"
+```
+
+__!!__ use list(c()) to generate gene list for scoring
+dc.genes 
+'Ager', 'Azi2', 'Batf', 'Batf2', 'Batf3', 'Camk4', 'Ccl19', 'Ccr7', 'Cd40lg', 'Cebpb', 'Csf2', 'Dcstamp', 'F2rl1', 'Flt3', 'Gata1', 'H2-M3', 'Il4', 'Irf4', 'Ltbr', 'Lyn', 'Notch2', 'Pirb', 'Prtn3', 'Psen1', 'Rbpj', 'Relb', 'Spi1', 'Tgfb1', 'Tgfbr2', 'Tmem176a', 'Tmem176b', 'Tnfsf9', 'Traf6', 'Trem2', 'Trpm2', 'Ubd', 'Zbtb46'
+
+'Ager', 'Azi2', 'Batf', 'Batf2', 'Batf3', 'Camk4', 'Ccr7',  'Cebpb', 'Dcstamp', 'F2rl1', 'Flt3', 'Gata1', 'H2-M3', 'Il4', 'Irf4', 'Ltbr', 'Lyn', 'Notch2', 'Pirb', 'Prtn3', 'Psen1', 'Rbpj', 'Relb', 'Spi1', 'Tgfb1', 'Tgfbr2', 'Tmem176a', 'Tmem176b', 'Tnfsf9', 'Traf6', 'Trem2', 'Trpm2', 'Zbtb46'
+
+dc nega
+'H2-M3','Tmem176a','Tmem176b','Zbtb46'
+
+dc posi
+'Ager','Cd40lg' #not in data,'Zbtb46'
+
+```{r}
+## Calculate DC differentiation score
+dc.genes <- list(c('Ager', 'Azi2', 'Batf', 'Batf2', 'Batf3', 'Camk4', 'Ccl19', 'Ccr7', 'Cd40lg', 'Cebpb', 'Csf2', 'Dcstamp', 'F2rl1', 'Flt3', 'Gata1', 'H2-M3', 'Il4', 'Irf4', 'Ltbr', 'Lyn', 'Notch2', 'Pirb', 'Prtn3', 'Psen1', 'Rbpj', 'Relb', 'Spi1', 'Tgfb1', 'Tgfbr2', 'Tmem176a', 'Tmem176b', 'Tnfsf9', 'Traf6', 'Trem2', 'Trpm2', 'Ubd', 'Zbtb46'))
+dc <- AddModuleScore(dc, dc.genes, name = "dcDifScore") 
+FeaturePlot(dc, features = "dcDifScore1", split.by = "HTO_maxID", ncol = 2) 
+
+```
+
+```{r}
+## Calculate survival score http://www.informatics.jax.org/go/term/GO:0043066
+## 927 genes
+survGenes <- scan("analysis/survivalGenes.txt", what="", sep=",")
+dc <- AddModuleScore(dc, list(survGenes), name = "survSco")
+FeaturePlot(dc, features = "survSco1", split.by = "HTO_maxID", ncol = 2) 
+```
+
+```{r}
+## Calculate death score http://www.informatics.jax.org/go/term/GO:0043065
+## 642 genes
+deathGenes <- scan("deathGenes.txt", what="", sep=",")
+dc <- AddModuleScore(dc, list(deathGenes), name = "deathSco")
+FeaturePlot(dc, features = "deathSco1", split.by = "HTO_maxID", ncol = 2) 
+```
+
+```{r}
+hashMarkers <- FindAllMarkers(dc, min.pct = 0.25, logfc.threshold = 0.25)
+## did for Hash1,2,3,4 clusters, defined by active.ident and Idents()
+write.csv(hashMarkers, "Markers/hashMarkers_all_4_Hashs.csv")
+```
+
+# A tibble: 8 x 7
+# Groups:   cluster [4]
+      p_val avg_logFC pct.1 pct.2 p_val_adj cluster gene   
+      <dbl>     <dbl> <dbl> <dbl>     <dbl> <fct>   <chr>  
+1 0.            0.847 1     1     0.        Hash1   Gm42418
+2 1.03e- 93     0.992 0.28  0.141 1.74e- 89 Hash1   Mpo    
+3 6.37e-210     0.975 0.453 0.191 1.08e-205 Hash2   Camp   
+4 1.13e-160     0.996 0.419 0.193 1.91e-156 Hash2   Chil3  
+5 4.12e-238     0.551 0.875 0.609 6.98e-234 Hash5   Ly6a   
+6 8.69e-232     0.542 0.861 0.598 1.47e-227 Hash5   Ifitm1 
+7 3.96e-214     0.798 0.718 0.459 6.72e-210 Hash3   H2-Aa  
+8 1.41e-188     0.832 0.832 0.619 2.38e-184 Hash3   Ifitm1 
+
+
+
+```{r}
+# library(future)
+# plan(strategy = "multicore", workers = 6)
+Idents(dc) <- "seurat_clusters"
+clusMarkers <- FindAllMarkers(dc, min.pct = 0.25, logfc.threshold = 0.25)
+```
+
+```{r}
+#Save clusMarkers into csv file
+write.csv(clusMarkers, "Markers_all_16_clusters.csv")
+ttable <- clusMarkers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_logFC)
+write.csv(ttable, "Top10_markers_all_16_clusters.csv")
+ttable <- clusMarkers %>% group_by(cluster) %>% top_n(n = 4, wt = avg_logFC)
+write.csv(ttable, "Top4_markers_all_16_clusters.csv")
+```
+
+```{r}
+## Call cluster names
+# Idents(dc) <- "seurat_clusters" #make sure
+
+DimPlot(dc, label = TRUE, pt.size = 0.1) + NoLegend()
+
+```
+```{r}
+print(head(clusMarkers[clusMarkers$cluster == 0,],20)['gene'], row.names = FALSE)
+# copy & paste to enrichr to identify cell types
+```
+
+Clusters: 
+=========
+use ARCHS4 Tissues and Mouse Gene Atlas on ENRichr, look at individual genes
+
+|#  |Prof|    Cell type          |Genes               |Datbase|Confidence Fold change|
+|---|--|--------------------------|--------------------|-------|-----------|
+|0  |++|?BM/CD34+/HSC-3??         |Hist1h1b/Top2a(DNA) |Archs4 | poor  |
+|1  |- |DC1                       |high MHCII          |Archs4 |
+|2  |- |Bcell                     |+++                 |Archs4 |
+|3  |- |DC2                       |inflame DCs         |Archs4 |
+|4  |- |pDCs                      |+++                 |MAtlas |
+|5  |- |Neutrophil/Gran           |+++ S100a9/8 ExCell |Archs4 |
+|6  |+ |?BM/CD34+/TBlast          |Ctr9/Myl10          |Archs4 | poor  |
+|7  |+ |?BM/CD34+/HSC-3??         |Prtn3(Neutr)/Hspd1  |Archs4 | poor  |
+|8  |++|?BM/GMP                   |Hist1h1b/1h2ae gene |MAtlas | poor  |
+|9  |+ |Neutrophil/GMP/Baso       |Elane/Mpo/Ctsg/Cd63 |GeneFunc/MAtlas |
+|10 |++|?BM pDC precursor?        |Siglech/Ubp1        |Genefunc+MAtlas | poor  |
+|11 |- |CD8a+ DC                  |+++Naaa/Rab7b/Aif1  |MAtlas+A+Genefunc| 
+|12 |- |Macrophages               |+++Ccl5/Ccr7        |Archs4 |
+|13 |- |LDL myeloid cells?.DC.Mac |Apoe/Pla2g7         |M=A, gene|
+|14 |++|Neutrophil                |+++Fcnb/Cd177       |Archs4+GeneFunc|
+|15 |- |Tcell                     |+++Gata3/Cxcr6/Trbc2|M+A
+
+```{r}
+dcClu0 <- subset(dc, seurat_clusters == 0)
+Idents(dcClu0) <- "HTO_maxID"
+clu0Mkr <- FindMarkers(dcClu0, ident.1 = c("Hash1","Hash3"), ident.2 = c("Hash2", "Hash5"), min.pct = 0.25)
+```
+
+                p_val  avg_logFC pct.1 pct.2     p_val_adj
+Ctse    9.507948e-250  0.4373320 0.782 0.081 1.610837e-245
+__Gm47283 5.727753e-245 -0.7141864 0.101 0.893 9.703959e-241__
+Lamtor3  2.792695e-90  0.2586483 0.811 0.470  4.731384e-86
+H2-K1    1.007590e-71  0.3349745 0.992 0.996  1.707059e-67
+Fcer1g   7.434928e-27  0.2868002 0.971 0.923  1.259626e-22
+
+
+```{r}
+Idents(dc) <- "seurat_clusters"
+dcHSPCs <- subset(dc, idents = c(0,6,7,8,10))
+Idents(dcHSPCs) <- "HTO_maxID"
+HSPCsMkr <- FindMarkers(dcHSPCs, ident.1 = c("Hash1","Hash3"), ident.2 = c("Hash2", "Hash5"), min.pct = 0.25)
+```
+
+                p_val  avg_logFC pct.1 pct.2     p_val_adj
+Ctse     0.000000e+00  0.5009097 0.722 0.069  0.000000e+00
+__Gm47283  0.000000e+00 -0.6013394 0.078 0.756  0.000000e+00__
+Ppfia4  6.453390e-256 -0.3475557 0.051 0.495 1.093333e-251
+H2-K1   4.500679e-211  0.4317087 0.992 0.987 7.625050e-207
+H2-D1    2.636879e-93  0.2698662 0.992 0.995  4.467400e-89
+
+```{r}
+FeaturePlot(dcHSPCs, features = "Gm47283", split.by = "HTO_maxID", ncol = 2)
+FeaturePlot(dcHSPCs, features = "Ctse", split.by = "HTO_maxID", ncol = 2)
+```
+
+```{r}
+HSPCsMkrMore <- FindMarkers(dcHSPCs, ident.1 = c("Hash1","Hash3"), ident.2 = c("Hash2", "Hash5"), min.pct = 0.10, logfc.threshold = 0.10)
+```
+
+                p_val  avg_logFC pct.1 pct.2     p_val_adj
+Ctse     0.000000e+00  0.5009097 0.722 0.069  0.000000e+00 __!!__ MHCII Ag Proc
+Gm47283  0.000000e+00 -0.6013394 0.078 0.756  0.000000e+00 __!!__ ChrY
+Ppfia4  6.453390e-256 -0.3475557 0.051 0.495 1.093333e-251 __!!__ liprin-??4 PTPRF
+H2-K1   4.500679e-211  0.4317087 0.992 0.987 7.625050e-207
+Mid1    1.570456e-197 -0.1628981 0.012 0.362 2.660666e-193 
+Lamtor3 5.365489e-151  0.2449325 0.687 0.406 9.090212e-147
+H2-D1    2.636879e-93  0.2698662 0.992 0.995  4.467400e-89
+Wdfy1    2.556669e-91 -0.1363079 0.172 0.432  4.331509e-87
+Trim12a  1.499615e-83  0.2105972 0.606 0.380  2.540648e-79
+Ide      1.030360e-79  0.2126232 0.740 0.616  1.745636e-75
+Ebi3     5.113110e-74  0.1141626 0.283 0.099  8.662631e-70
+Slamf1   8.238211e-60 -0.1176460 0.024 0.162  1.395718e-55 __!!__
+Myo5a    8.816297e-59  0.1724274 0.682 0.536  1.493657e-54
+Mcub     8.380797e-58  0.1031978 0.151 0.033  1.419875e-53
+Rnpep    1.325760e-57 -0.1681275 0.602 0.757  2.246103e-53
+Tmsb10   2.934530e-57  0.2239847 0.990 0.997  4.971680e-53
+Fcer1g   4.806087e-56  0.2993867 0.960 0.903  8.142472e-52
+Dbi      5.748361e-56 -0.1865368 0.955 0.971  9.738874e-52
+Eif2s3y  2.992395e-52  0.1545605 0.689 0.479  5.069715e-48
+Trim34a  4.591999e-47  0.1327400 0.388 0.224  7.779765e-43
+
+```{r}
+d3HSPCMkr <- FindMarkers(dcHSPCs, ident.1 = "Hash1", ident.2 = "Hash2", min.pct = 0.10, logfc.threshold = 0.10)
+d5HSPCMkr <- FindMarkers(dcHSPCs, ident.1 = "Hash3", ident.2 = "Hash5", min.pct = 0.10, logfc.threshold = 0.10)
+#head(HSPCMkr, n = 15)
+```
+
+### Results
+
+```{r}
+dcDC <- subset(dc, idents = c(1,3,4,11,13))
+Idents(dcDC) <- "HTO_maxID"
+DCsMkrMore <- FindMarkers(dcDC, ident.1 = c("Hash1","Hash3"), ident.2 = c("Hash2", "Hash5"), min.pct = 0.10, logfc.threshold = 0.10)
+```
+

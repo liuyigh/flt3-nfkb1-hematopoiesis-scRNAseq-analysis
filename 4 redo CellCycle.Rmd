@@ -1,0 +1,589 @@
+---
+title: "DC V4, subclustering and ADT"
+output: html_notebook
+---
+
+V4 (original V4.1)
+
+Realized CellCycleScoreing and related statistics are calculated with one human only gene name "Hn1", which should be "Jpt1". Should only affect cellcyclescoring, counts, and plots. Should not affect clustering and DEGs.
+
+Then realized another 2 outdated genes: Fam64a -> Pimreg; Mlf1ip-> Cenpu
+https://github.com/liuyigh/tinyatlas/blob/master/cell_cycle/Mus_musculus.csv
+
+Confirmed with python sets that three genes are different. Hence redo cell cycle.
+
+## See Enrichr Analysis of 56 genes
+
+
+```{r}
+library(Seurat)
+library(dplyr)
+library(ggplot2)
+library(ggrepel)
+```
+
+## Fix three cell cycle gene error here
+```{r}
+firstup <- function(x) {
+  x <- tolower(x)
+  substr(x, 1, 1) <- toupper(substr(x, 1, 1))
+  x
+}
+
+s.genes <- firstup(cc.genes$s.genes)
+g2m.genes <- firstup(cc.genes$g2m.genes)
+library(stringr)
+g2m.genes <- str_replace(g2m.genes, 'Hn1', 'Jpt1')
+g2m.genes <- str_replace(g2m.genes, 'Fam64a', 'Pimreg')
+s.genes <- str_replace(s.genes, 'Mlf1ip', 'Cenpu')
+
+
+dc <- CellCycleScoring(dc, s.features = s.genes, g2m.features = g2m.genes, set.ident = TRUE)
+```
+
+```{r}
+cccounts <- table(dc$Phase, dc$seurat_clusters)
+write.csv(cccounts, "cccounts.csv")
+cccounts.pct <- round(prop.table(cccounts, 2)*100, 1)
+write.csv(cccounts.pct, "cccounts-pct.csv")
+
+library(ggplot2)
+library(ggheatmap)
+ggheatmap(as.data.frame.matrix(cccounts.pct), colorPalette = "PuRd")
+
+```
+
+## redo hash CCCount, copy from dc_v3.Rmd
+```{r}
+ccCountHash <- table(dc$Phase, dc$seurat_clusters, dc$HTO_maxID)
+library(gridExtra)
+plots <- list() 
+for (i in seq(4)) {
+  plots[[i]] <- ggheatmap(as.data.frame.matrix(round(prop.table(ccCountHash[,,i], 2)*100, 1)), orderCol = F, colorPalette = "PuRd")
+}
+do.call(grid.arrange, c(plots, ncol = 2))
+
+write.csv(ccCountHash,"ccCountHash.csv" , row.names=FALSE)
+saveRDS(ccCountHash, "ccCountHash.rds")
+
+## better way
+ccCountHashPct <- round(prop.table(ccCountHash, c(3,2))*100, digits =1)
+saveRDS(ccCountHashPct, "ccCountHashPct.rds")
+##view table
+# ftable(ccCountHash, row.vars = 2)
+
+```
+
+
+## ADT preliminary. Not useful. Can ignore. Did not redo.
+```{r}
+FeaturePlot(dc, features = c("Adt.CD11b", "Adt.CD11c", "Adt.B220", "Adt.SiglecH", "Itgam", "Itgax", "Ptprc", "Siglech"), min.cutoff = "q05", max.cutoff = "q95", ncol = 4)
+```
+
+```{r}
+Idents(dc) <- "seurat_clusters"
+RidgePlot(dc, features = c("Adt.CD11b", "Adt.CD11c", "Adt.B220", "Adt.SiglecH"), ncol = 2)
+```
+
+```{r}
+RidgePlot(dc, features = c("Adt.MHCII", "Adt.Gr1", "Adt.Sirpa", "Adt.CD24", "Adt.F480"), ncol = 2)
+```
+
+```{r}
+Idents(dc) <- "HTO_maxID"
+FeaturePlot(dc, features = "Ptprc", split.by = "HTO_maxID", ncol = 2)
+FeaturePlot(dc, features = "Adt.B220", split.by = "HTO_maxID", ncol = 2)
+FeaturePlot(dc, features = "Adt.CD24", split.by = "HTO_maxID", ncol = 2)
+FeaturePlot(dc, features = "Adt.Sirpa", split.by = "HTO_maxID", ncol = 2)
+FeaturePlot(dc, features = "Adt.MHCII", split.by = "HTO_maxID", ncol = 2)
+FeaturePlot(dc, features = "Adt.Gr1", split.by = "HTO_maxID", ncol = 2)
+FeaturePlot(dc, features = "Adt.F480", split.by = "HTO_maxID", ncol = 2)
+FeaturePlot(dc, features = "Adt.CD11b", split.by = "HTO_maxID", ncol = 2)
+FeaturePlot(dc, features = "Adt.CD11c", split.by = "HTO_maxID", ncol = 2)
+FeaturePlot(dc, features = "Adt.SiglecH", split.by = "HTO_maxID", ncol = 2)
+```
+## END Above ^^^ ADT preliminary
+
+## subset relevant clusters.
+```{r}
+Idents(dc) <- "seurat_clusters"
+dcSub <- subset(dc, idents = c(0,1,3,4,6,7,8,9,10,11))
+
+dcSub <- NormalizeData(dcSub)
+dcSub <- FindVariableFeatures(dcSub, selection.method = "mean.var.plot")
+dcSub <- ScaleData(dcSub, features = VariableFeatures(dcSub))
+dcSub <- RunPCA(dcSub, features = VariableFeatures(dcSub))
+
+VizDimLoadings(dcSub, dims = 1:4, reduction = "pca")
+DimHeatmap(dcSub, dims = 1:15, cells = 500, balanced = TRUE)
+```
+
+```{r}
+ElbowPlot(dcSub, ndims = 40)
+dcSub <- JackStraw(dcSub, num.replicate = 100, dims = 50)
+dcSub <- ScoreJackStraw(dcSub, dims = 1:40)
+
+# 'Significant' PCs will show a strong enrichment of features with low p-values (solid curve above the dashed line). 
+JackStrawPlot(dcSub, dims = 1:40)
+```
+
+```{r}
+dcSub <- FindNeighbors(dcSub, reduction = "pca", dims = 1:29)
+dcSub <- RunTSNE(dcSub, reduction = "pca", dims = 1:20)
+dcSub <- RunUMAP(dcSub, dims = 1:20)
+
+#FeaturePlot(dcSub, features = "nFeature_RNA", split.by = "HTO_maxID", ncol = 2)
+
+#dcSub <- FindClusters(dcSub, resolution = 0.5, verbose = FALSE) #13 clusters
+#dcSub <- FindClusters(dcSub, resolution = 0.3, verbose = FALSE) #10 clusters
+dcSub <- FindClusters(dcSub, resolution = 0.2, verbose = FALSE) #7 clusters
+#DimPlot(dcSub, reduction = "tsne", split = "HTO_maxID")
+DimPlot(dcSub, split.by = "HTO_maxID") #UMAP better
+```
+
+```{r}
+clusMarkers <- FindAllMarkers(dcSub, min.pct = 0.25, logfc.threshold = 0.25)
+```
+
+Clusters: 
+=========
+use ARCHS4 Tissues and Mouse Gene Atlas on ENRichr, look at individual genes
+
+|#  |Prof|    Cell type           |Genes               |Datbase|Confidence Fold change|
+|---|--|--------------------------|--------------------|-------|-----------|
+|0  |++|HSPCs                     |Hist1h1b/Top2a(DNA) |Archs4 | poor  |
+|1  |- |DC1                       |high MHCII          |Archs4 |
+|2  |+ |?BM/CD34+/TBlast          |Hells/Ctr9/Myl10    |Archs4 | poor  |
+|3  |- |pDC                       |Siglech Ccr9 Ctsl   |Archs4 |
+|4  |+ |Neutrophil/GMP/Baso       |Elane/Mpo/Ctsg/Cd63 |GeneFunc/MAtlas |
+|5  |- |Early lymph               |Ly6d                |Archs4 |
+|6  |+ |CD8 DCs           |Ctr9/Myl10          |Archs4 | poor  |
+
+```{r}
+#Save clusMarkers into csv file
+write.csv(clusMarkers, "Sub_Markers_all_7_clusters.csv")
+ttable <- clusMarkers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_logFC)
+write.csv(ttable, "Sub_Top10_markers_all_7_clusters.csv")
+ttable <- clusMarkers %>% group_by(cluster) %>% top_n(n = 4, wt = avg_logFC)
+write.csv(ttable, "Sub_Top4_markers_all_7_clusters.csv")
+```
+
+## Regress cell cycle using alternative workflow
+```{r}
+dcSub$CC.Difference <- dcSub$S.Score - dcSub$G2M.Score
+dcCC <- ScaleData(dcSub, vars.to.regress = "CC.Difference", features = rownames(dcSub))
+```
+## redo PCA-UMAP analysis after cell cycle regression
+```{r}
+dcCC <- RunPCA(dcCC, features = VariableFeatures(dcCC), nfeatures.print = 10)
+
+VizDimLoadings(dcCC, dims = 1:4, reduction = "pca")
+DimHeatmap(dcCC, dims = 1:15, cells = 500, balanced = TRUE)
+```
+
+PC_ 1 
+Positive:  Ctss, Cd74, S100a6, Lgals3, H2-Aa, H2-Eb1, H2-Ab1, Cd52, Slfn2, Ctsh 
+Negative:  Hsp90ab1, Ptma, Ncl, Hspd1, Ppia, Ube2s, Srm, mt-Nd1, Egfl7, Pclaf 
+PC_ 2 
+Positive:  Siglech, Atp1b1, Tcf4, Ctsl, Ly6d, Runx2, Cox6a2, Ccr9, Pltp, Pacsin1 
+Negative:  Ifitm2, Ifitm3, H2afz, Ifitm1, Prtn3, Ccr2, Ms4a6c, Lyz2, Anxa2, Msrb1 
+PC_ 3 
+Positive:  Hp, Ly6c2, Mgst1, C3, Gda, Thbs1, Igsf6, Gsr, F13a1, Cebpb 
+Negative:  Klrd1, Lsp1, Ifi203, Ckb, H2-DMb2, Ccnd1, Ctnnd2, Ciita, H2-Ob, Pak1 
+PC_ 4 
+Positive:  Cd63, Kit, Pglyrp1, Ltb, Thbs1, Rab44, Mpo, Adgrg1, H2-Ob, Nkg7 
+Negative:  Pclaf, Psap, Ppia, Birc5, Ccr2, Rrm2, Ctsc, Mki67, Ifi27l2a, Irf8 
+PC_ 5 
+Positive:  Elane, F630028O10Rik, Ms4a3, Cst3, Mpo, Pak1, Ctsg, Slco3a1, Rab7b, Naaa 
+Negative:  Myl10, AA467197, Ctr9, Il12a, Itga4, Gimap6, Satb1, Ptprcap, Sox4, Clec4n 
+
+```{r}
+ElbowPlot(dcCC, ndims = 40)
+dcCC <- JackStraw(dcCC, num.replicate = 100, dims = 50)
+dcCC <- ScoreJackStraw(dcCC, dims = 1:40)
+
+# 'Significant' PCs will show a strong enrichment of features with low p-values (solid curve above the dashed line). 
+JackStrawPlot(dcCC, dims = 1:40)
+```
+
+```{r}
+dcCC <- FindNeighbors(dcCC, reduction = "pca", dims = 1:29)
+dcCC <- RunTSNE(dcCC, reduction = "pca", dims = 1:20)
+dcCC <- RunUMAP(dcCC, dims = 1:20)
+
+#FeaturePlot(dcCC, features = "nFeature_RNA", split.by = "HTO_maxID", ncol = 2)
+
+#dcCC <- FindClusters(dcCC, resolution = 0.5, verbose = FALSE) #13 clusters
+#dcCC <- FindClusters(dcCC, resolution = 0.3, verbose = FALSE) #10 clusters
+dcCC <- FindClusters(dcCC, resolution = 0.2, verbose = FALSE) #7 clusters
+#DimPlot(dcCC, reduction = "tsne", split = "HTO_maxID")
+DimPlot(dcCC, split.by = "HTO_maxID") #UMAP better
+```
+
+```{r}
+clusMarkers <- FindAllMarkers(dcCC, min.pct = 0.25, logfc.threshold = 0.25)
+```
+```{r}
+#Save clusMarkers into csv file
+write.csv(clusMarkers, "Sub_Markers_all_7_clusters.csv")
+ttable <- clusMarkers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_logFC)
+write.csv(ttable, "Sub_Top10_markers_all_7_clusters.csv")
+ttable <- clusMarkers %>% group_by(cluster) %>% top_n(n = 4, wt = avg_logFC)
+write.csv(ttable, "Sub_Top4_markers_all_7_clusters.csv")
+```
+
+### recluster DC main
+realized that clusters and data changed after redo cell cycle, decide to regress all the cells again, instead of just regressing the DC subsets above.
+
+## Regress cell cycle using alternative workflow
+```{r}
+dc$CC.Difference <- dc$S.Score - dc$G2M.Score
+dcReg <- ScaleData(dc, vars.to.regress = "CC.Difference", features = rownames(dc))
+```
+
+```{r}
+dcReg <- RunPCA(dcReg, features = VariableFeatures(dcReg), nfeatures.print = 10)
+
+VizDimLoadings(dcReg, dims = 1:4, reduction = "pca")
+DimHeatmap(dcReg, dims = 1:15, cells = 500, balanced = TRUE)
+```
+
+PC_ 1 
+Positive:  Ighm, Ptprcap, Dnajc7, Pafah1b3, Ly6d, Atp1b1, Cd79b, Cnp, Chchd10, Pkig 
+Negative:  Anxa1, Pglyrp1, Wfdc21, Lcn2, Ngp, Pygl, Lyz2, S100a8, Camp, C3 
+PC_ 2 
+Positive:  Vpreb3, Ebf1, Cd79a, Chchd10, Cd79b, Cd24a, Ighm, Mzb1, Cecr2, Akap12 
+Negative:  Rpsa, Cst3, Rplp0, Ctss, S100a4, Ms4a4c, Ifitm1, Ifitm2, Tmem176b, Ms4a6b 
+PC_ 3 
+Positive:  Btg1, Cd74, H2-Aa, H2-Eb1, Ctss, H2-Ab1, Marcks, Btg2, Ifi27l2a, Slfn5 
+Negative:  Mki67, Prtn3, H2afx, Cenpf, Hsp90ab1, Hist1h1b, Hist1h2ap, Ctsg, Ube2c, Hist1h2ae 
+PC_ 4 
+Positive:  Siglech, Ctsl, Ccr9, Runx2, Pacsin1, Cox6a2, Pltp, Upb1, Tcf4, Cd7 
+Negative:  Ifitm2, Ifitm3, Ccl9, Prtn3, Ifitm1, Chchd10, Ebf1, Vpreb3, Cd79b, Ms4a6b 
+PC_ 5 
+Positive:  Ctsc, Tgfbi, Fth1, Ms4a6b, Ifi204, Ifi27l2a, Csf1r, Ms4a4c, Ms4a6d, Emilin2 
+Negative:  Fscn1, Cacnb3, Socs2, Ccr7, Ccl5, Serpinb6b, Serpinb9, Cd83, Il4i1, Ramp3 
+
+```{r}
+dcReg <- FindNeighbors(dcReg, reduction = "pca", dims = 1:29)
+dcReg <- FindClusters(dcReg, resolution = 0.5, verbose = FALSE)
+dcReg <- RunUMAP(dcReg, dims = 1:20)
+DimPlot(dcReg, split.by = "HTO_maxID") #UMAP better
+DimPlot(dcReg, label = TRUE, pt.size = 0.1) + NoLegend()
+
+```
+
+## subset again after regressing all.
+
+```{r}
+dcSubReg <- subset(dcReg, idents = c(0,1,2,4,6,7,8,9,10,11,12)) ## subset worked
+dcSubReg <- FindVariableFeatures(dcSubReg, selection.method = "mean.var.plot")
+dcSubReg <- RunPCA(dcSubReg, features = VariableFeatures(dcSubReg))
+
+VizDimLoadings(dcSubReg, dims = 1:4, reduction = "pca")
+DimHeatmap(dcSubReg, dims = 1:15, cells = 500, balanced = TRUE)
+```
+
+```{r}
+dcSubReg <- FindNeighbors(dcSubReg, reduction = "pca", dims = 1:29)
+dcSubReg <- FindClusters(dcSubReg, resolution = 0.2, verbose = FALSE) #6 clusters
+# dcSubReg <- RunTSNE(dcSubReg, reduction = "pca", dims = 1:20)
+dcSubReg <- RunUMAP(dcSubReg, dims = 1:20)
+
+#FeaturePlot(dcSubReg, features = "nFeature_RNA", split.by = "HTO_maxID", ncol = 2)
+
+#dcSubReg <- FindClusters(dcSubReg, resolution = 0.4, verbose = FALSE) #13 clusters
+#dcSubReg <- FindClusters(dcSubReg, resolution = 0.3, verbose = FALSE) #10 clusters
+#DimPlot(dcSubReg, reduction = "tsne", split = "HTO_maxID")
+DimPlot(dcSubReg, split.by = "HTO_maxID", label = TRUE, pt.size = 0.1) + NoLegend() #UMAP better
+```
+
+```{r}
+clusMarkers <- FindAllMarkers(dcSubReg, min.pct = 0.25, logfc.threshold = 0.25)
+```
+```{r}
+
+#Save clusMarkers into csv file
+write.csv(clusMarkers, "Sub_Markers_all_7_clusters.csv")
+ttable <- clusMarkers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_logFC)
+write.csv(ttable, "Sub_Top10_markers_all_7_clusters.csv")
+ttable <- clusMarkers %>% group_by(cluster) %>% top_n(n = 4, wt = avg_logFC)
+write.csv(ttable, "Sub_Top4_markers_all_7_clusters.csv")
+
+```
+
+# Now compare between WT and KO in cluster 1
+
+```{r}
+dcSRClu1 <- subset(dcSubReg, seurat_clusters == 1)
+Idents(dcSRClu1) <- "HTO_maxID"
+SRclu1Mkr <- FindMarkers(dcSRClu1, ident.1 = c("Hash1","Hash3"), ident.2 = c("Hash2", "Hash5"), min.pct = 0.10, logfc.threshold = 0.10)
+SRclu1Mkr$pctDiff <- abs(SRclu1Mkr$pct.1 - SRclu1Mkr$pct.2)
+SRclu1Mkr$pctFold1 <- SRclu1Mkr$pct.1 / SRclu1Mkr$pct.2
+SRclu1Mkr$pctFold2 <- SRclu1Mkr$pct.2 / SRclu1Mkr$pct.1
+SRclu1Mkr$pctFold <- apply(SRclu1Mkr[c(7,8)], 1, max)
+write.csv(SRclu1Mkr, "DEG-Clu1-CCSubReg-20191111.csv")
+```
+
+# Now compare between WT and KO in cluster 2
+```{r}
+dcSRClu2 <- subset(dcSubReg, seurat_clusters == 2)
+Idents(dcSRClu2) <- "HTO_maxID"
+SRclu2Mkr <- FindMarkers(dcSRClu2, ident.1 = c("Hash1","Hash3"), ident.2 = c("Hash2", "Hash5"), min.pct = 0.10, logfc.threshold = 0.10)
+SRclu2Mkr$pctDiff <- abs(SRclu2Mkr$pct.1 - SRclu2Mkr$pct.2)
+SRclu2Mkr$pctFold1 <- SRclu2Mkr$pct.1 / SRclu2Mkr$pct.2
+SRclu2Mkr$pctFold2 <- SRclu2Mkr$pct.2 / SRclu2Mkr$pct.1
+SRclu2Mkr$pctFold <- apply(SRclu2Mkr[c(7,8)], 1, max)
+write.csv(SRclu2Mkr, "DEG-clu2-CCSubReg-20191111.csv")
+```
+
+# Now compare between WT and KO in cluster 0,3,5
+```{r}
+dcSRClu035 <- subset(dcSubReg, seurat_clusters %in% c(0,3,5)) ## was ==, should be %in%, find as bug on 11152019, see line 489-507
+Idents(dcSRClu035) <- "HTO_maxID"
+SRclu035Mkr <- FindMarkers(dcSRClu035, ident.1 = c("Hash1","Hash3"), ident.2 = c("Hash2", "Hash5"), min.pct = 0.10, logfc.threshold = 0.10)
+SRclu035Mkr$pctDiff <- abs(SRclu035Mkr$pct.1 - SRclu035Mkr$pct.2)
+SRclu035Mkr$pctFold1 <- SRclu035Mkr$pct.1 / SRclu035Mkr$pct.2
+SRclu035Mkr$pctFold2 <- SRclu035Mkr$pct.2 / SRclu035Mkr$pct.1
+SRclu035Mkr$pctFold <- apply(SRclu035Mkr[c(7,8)], 1, max)
+write.csv(SRclu035Mkr, "~/scRNAseq/analysis/DEGs/DEG-CCRegSub/DEG-Clu035-CCSubReg-20191115-subset-bug-fix.csv")
+```
+## DEG
+Mid1 and Slamf1 are uniquely differentially expressed by 
+```{r}
+features <- c("Mid1", "Ppfia4", "Ctse", "Lamtor3", "Slamf1", "Ciita")
+Idents(dcSubReg) <- "HTO_maxID"
+VlnPlot(dcSubReg, features = features, pt.size = 0.1)
+
+```
+
+## cell cycle phase heatmap
+```{r}
+DimPlot(dcSubReg, split.by = "HTO_maxID", group.by = "Phase")
+
+ccCountHashSubReg <- table(dcSubReg$Phase, dcSubReg$seurat_clusters, dcSubReg$HTO_maxID)
+library(gridExtra)
+library(ggplot2)
+library(ggheatmap)
+plots <- list() 
+for (i in seq(4)) {
+  plots[[i]] <- ggheatmap(as.data.frame.matrix(round(prop.table(ccCountHashSubReg[,,i], 2)*100, 1)), orderCol = F, colorPalette = "PuRd")
+}
+do.call(grid.arrange, c(plots, ncol = 2))
+
+write.csv(ccCountHashSubReg,"ccCountHashSubReg.csv" , row.names=FALSE)
+saveRDS(ccCountHashSubReg, "ccCountHashSubReg.rds")
+
+## better way
+ccCountHashSubRegPct <- round(prop.table(ccCountHashSubReg, c(3,2))*100, digits =1)
+saveRDS(ccCountHashSubRegPct, "ccCountHashSubRegPct.rds")
+
+```
+## try export data to loomR format for monocle3 analysis
+remotes::install_github(repo ='mojaveazure/loomR', ref = 'develop')
+
+```{r}
+library(loomR)
+dcSubReg.loom <- as.loom(dcSubReg, filename = "dcSubReg.loom", verbose = FALSE)
+dcSubReg.loom
+dcSubReg.loom$close_all()
+
+dc.sce <- as.SingleCellExperiment(dcSubReg)
+```
+
+## copied from B cell analysis. Needs to change.
+## DID NOT DO. __!!!__
+```{r}
+survMM <- str_split("Bcl2,Bcl2l1,Traf1,Traf2,Birc2,Birc3,Cflar,Xiap,Tnfaip3,Fth1,Sod2,Gadd45b", ',')
+bcell <- AddModuleScore(bcell, survMM, name = "survMMSco")
+
+deathMM <- str_split("Tnf,Cyld,Fas,Fasl", ',')
+bcell <- AddModuleScore(bcell, deathMM, name = "deathMMSco")
+```
+
+#Save original DEGs Markers into csv file Cleanup workspace
+```{r}
+#Save original DEGs Markers into csv file Cleanup workspace
+write.csv(clu0Mkr, "~/scRNAseq/analysis/DEGs/DEG-originals/OrigDEG_Clus0_#13v25_0.25.csv")
+write.csv(d3HSPCMkr, "~/scRNAseq/analysis/DEGs/DEG-originals/OrigDEG_d3HSPC067810_#1v2_0.10_0.10.csv")
+write.csv(d5HSPCMkr, "~/scRNAseq/analysis/DEGs/DEG-originals/OrigDEG_d5HSPC067810_#3v5_0.10_0.10.csv")
+write.csv(DCsMkrMore, "~/scRNAseq/analysis/DEGs/DEG-originals/OrigDEG_DCs1341113_#13v25_0.10_0.10.csv")
+write.csv(HSPCsMkr, "~/scRNAseq/analysis/DEGs/DEG-originals/OrigDEG_HSPC067810_#13v25_0.25.csv")
+write.csv(HSPCsMkrMore, "~/scRNAseq/analysis/DEGs/DEG-originals/OrigDEG_HSPCMore067810_#13v25_0.10_0.10.csv")
+save(clu0Mkr, d3HSPCMkr, d5HSPCMkr, DCsMkrMore, HSPCsMkr, HSPCsMkrMore, file="~/scRNAseq/analysis/DEGs/DEG-originals/origDEGs.RData")
+save(list=c('clu0Mkr', 'd3HSPCMkr', 'd5HSPCMkr', 'DCsMkrMore', 'HSPCsMkr', 'HSPCsMkrMore'), file="~/scRNAseq/analysis/DEGs/DEG-originals/origDEGs-list.RData")
+```
+
+# Next few blocks trying to find the relationship between DEG and its dropout rates (as pct cell expressing that gene).
+
+## drop out rates distribution in cluster 1
+```{r}
+pct.clu1 <- round(
+                  rowSums(as.data.frame(dcSRClu1@assays$RNA@data)>0) /
+                  length(colnames(dcSRClu1)),
+                  digits = 3
+                  )
+
+pct.clu1 <- as.data.frame(pct.clu1)
+p <- ggplot(pct.clu1, aes(x='', y=pct.clu1)) +
+geom_violin()
+p + geom_boxplot(width=0.1)
+```
+Plot total counts of one gene and pct cell expressing that gene in all cells, red dot Mid1
+
+```{r}
+gene.counts.clu1 <- rowSums(as.data.frame(dcSRClu1@assays$RNA@counts))
+gene.counts.clu1 <- as.data.frame(gene.counts.clu1)
+gene.counts.and.zero <- merge(gene.counts.clu1, pct.clu1, by = 0)
+ggplot(gene.counts.and.zero, aes(x=gene.counts.clu1+1, y=pct.clu1)) + geom_point(size = 0.1) +geom_point(data = gene.counts.and.zero[gene.counts.and.zero$Row.names == 'Mid1',], size = 3, color = 'red')+ scale_x_continuous(trans='log10')+
+      geom_label_repel(data=  gene.counts.and.zero[gene.counts.and.zero$Row.names == 'Mid1',], aes(label = 'Mid1', color = 'red'),
+                      box.padding = unit(1.5, 'lines'),
+                  segment.color = 'deepskyblue'
+                  )+ NoLegend()
+```
+Compare WT vs KO in such plots, plot KO first, red dot Mid1
+
+```{r}
+Idents(dcSRClu1) <- "HTO_maxID"
+dcSRClu1KO <- subset(dcSRClu1, idents = c("Hash2","Hash5"))
+dcSRClu1WT <- subset(dcSRClu1, idents = c("Hash1","Hash3"))
+pct.clu1KO <- round(
+                  rowSums(as.data.frame(dcSRClu1KO@assays$RNA@data)>0) /
+                  length(colnames(dcSRClu1KO)),
+                  digits = 3
+                  )
+
+pct.clu1KO <- as.data.frame(pct.clu1KO)
+gene.counts.clu1KO <- rowSums(as.data.frame(dcSRClu1KO@assays$RNA@counts))
+gene.counts.clu1KO <- as.data.frame(gene.counts.clu1KO)
+gene.counts.and.zero.KO <- merge(gene.counts.clu1KO, pct.clu1KO, by = 0)
+ggplot(gene.counts.and.zero.KO, aes(x=gene.counts.clu1KO+1, y=pct.clu1KO)) + geom_point(size = 0.1) +
+  geom_point(data = gene.counts.and.zero.KO[gene.counts.and.zero.KO$Row.names == 'Mid1',], size = 3, color = 'red')+ scale_x_continuous(trans='log10')+
+      geom_label_repel(data=  gene.counts.and.zero.KO[gene.counts.and.zero.KO$Row.names == 'Mid1',], aes(label = 'Mid1', color = 'red'),
+                      box.padding = unit(1.5, 'lines'),
+                  segment.color = 'deepskyblue'
+                  )+ NoLegend()
+```
+
+Then plot WT. red dot Mid1
+
+```{r}
+pct.clu1WT <- round(
+                  rowSums(as.data.frame(dcSRClu1WT@assays$RNA@data)>0) /
+                  length(colnames(dcSRClu1WT)),
+                  digits = 3
+                  )
+
+pct.clu1WT <- as.data.frame(pct.clu1WT)
+gene.counts.clu1WT <- rowSums(as.data.frame(dcSRClu1WT@assays$RNA@counts))
+gene.counts.clu1WT <- as.data.frame(gene.counts.clu1WT)
+gene.counts.and.zero.WT <- merge(gene.counts.clu1WT, pct.clu1WT, by = 0)
+ggplot(gene.counts.and.zero.WT, aes(x=gene.counts.clu1WT+1, y=pct.clu1WT)) + geom_point(size = 0.1) +
+  geom_point(data = gene.counts.and.zero.WT[gene.counts.and.zero.WT$Row.names == 'Mid1',], size = 3, color = 'red')+ scale_x_continuous(trans='log10')+
+      geom_label_repel(data=  gene.counts.and.zero.WT[gene.counts.and.zero.WT$Row.names == 'Mid1',], aes(label = 'Mid1', color = 'red'),
+                      box.padding = unit(1.5, 'lines'),
+                  segment.color = 'deepskyblue'
+                  )+ NoLegend()
+```
+
+## find subset problem by count table, see line 342
+> table(dcSubReg$seurat_clusters)
+
+   0    1    2    3    4    5 
+3140 2969 2217 1685  791  292 
+> table(dcSRClu1$seurat_clusters)
+
+   0    1    2    3    4    5 
+   0 2969    0    0    0    0 
+> table(dcSRClu035$seurat_clusters)
+
+   0    1    2    3    4    5 
+1067    0    0  577    0  107 
+> table(dcSRClu2$seurat_clusters)
+
+   0    1    2    3    4    5 
+   0    0 2217    0    0    0 
+
+__!!!__ go back and redone dcSRClu035, see line 342
+use `Idents()` to change idents or `%in%`
+redo `gene.counts.and.go` stuff
+
+
+# plot cluster 1 DEGs pctDiff vs pctFold change
+```{r}
+ggplot(SRclu1Mkr, aes(x=pctDiff, y=pctFold, label=row.names(SRclu1Mkr))) + geom_point(size = 1) +
+      geom_label_repel(data=  SRclu1Mkr[SRclu1Mkr$pctFold > 2,], aes(label = row.names(SRclu1Mkr[SRclu1Mkr$pctFold > 2,])),
+                      box.padding = unit(1.5, 'lines'),
+                  segment.color = 'deepskyblue'
+                  )
+
+```
+
+# plot cluster 1 DEG, average log fold change vs p value adjusted  
+```{r}
+ggplot(SRclu1Mkr, aes(x=avg_logFC, y=-log10(p_val_adj), label=row.names(SRclu1Mkr))) + geom_point(size = 1) +
+      geom_label_repel(data=  SRclu1Mkr[log10(SRclu1Mkr$p_val_adj) < -30,], aes(label = row.names(SRclu1Mkr[log10(SRclu1Mkr$p_val_adj) < -30,])),
+                      box.padding = unit(0.5, 'lines'),
+                  segment.color = 'deepskyblue'
+                  )
+```
+
+# plot cluster 1 DEG, pct expression fold change (ifelse ave_logFC for direction of change) vs p value adjusted 
+```{r}
+ggplot(SRclu1Mkr, aes(x=pctFold*ifelse(avg_logFC >0, 1, -1), y=-log10(p_val_adj), label=row.names(SRclu1Mkr))) + geom_point(size = 1) +
+      geom_label_repel(data=  SRclu1Mkr[log10(SRclu1Mkr$p_val_adj) < -30,], aes(label = row.names(SRclu1Mkr[log10(SRclu1Mkr$p_val_adj) < -30,])),
+                      box.padding = unit(0.5, 'lines'),
+                  segment.color = 'deepskyblue'
+                  )
+```
+
+
+
+## check overlapping DEGs between progenitors and differentiated DCs
+```{r}
+union(rownames(SRclu1Mkr), rownames(SRclu2Mkr))
+intersect(rownames(SRclu1Mkr), rownames(SRclu2Mkr))
+setdiff(intersect(rownames(SRclu1Mkr), rownames(SRclu2Mkr)),rownames(SRclu035Mkr))
+```
+
+# see Mid1 expression by sample
+```{r}
+FeaturePlot(dcSubReg, features = "Mid1", split.by = "HTO_maxID", ncol = 2)
+```
+# Violin plot for DEGs
+```{r}
+Idents(dcSubReg) <- "HTO_maxID"
+VlnPlot(subset(dcSubReg, seurat_clusters == 1), features = 'Mid1', pt.size = 0.1)
+VlnPlot(subset(dcSubReg, seurat_clusters == 2), features = 'Mid1', pt.size = 0.1)
+VlnPlot(subset(dcSubReg, seurat_clusters %in% c(0,3,5)), features = 'Mid1', pt.size = 0.1)
+
+```
+
+# look at more genes
+```{r}
+FeaturePlot(dcSubReg, features = "Ppp2ca", split.by = "HTO_maxID", ncol = 2)
+FeaturePlot(dcReg, features = "Mid1", split.by = "HTO_maxID", ncol = 2)
+FeaturePlot(dcSubReg, features = "Adt.B220", split.by = "HTO_maxID", ncol = 2)
+FeaturePlot(dcSubReg, features = "Adt.CD11c", split.by = "HTO_maxID", ncol = 2)
+FeaturePlot(dcSubReg, features = "Adt.MHCII", split.by = "HTO_maxID", ncol = 2)
+
+```
+find DEGs between cluster 1 and 2, two progenitor clusters
+```{r}
+Idents(dcSubReg) <- "seurat_clusters"
+Clu12Mkr <- FindMarkers(dcSubReg, ident.1 = 1, ident.2 = 2, min.pct = 0.10, logfc.threshold = 0.10)
+Clu12Mkr$pctDiff <- abs(Clu12Mkr$pct.1 - Clu12Mkr$pct.2)
+Clu12Mkr$pctFold1 <- Clu12Mkr$pct.1 / Clu12Mkr$pct.2
+Clu12Mkr$pctFold2 <- Clu12Mkr$pct.2 / Clu12Mkr$pct.1
+Clu12Mkr$pctFold <- apply(Clu12Mkr[c(7,8)], 1, max)
+write.csv(Clu12Mkr, "~/scRNAseq/analysis/DEGs/DEG-CCRegSub/DEG-Clu1v2-CCSubReg-20191118.csv")
+```
+
+```{r}
+# View outliers on pct vs logCounts graph
+temp <- gene.counts.and.zero.KO[(gene.counts.and.zero.KO$pct.clu1KO >0.25) & (gene.counts.and.zero.KO$pct.clu1KO < 0.36),]
+FeaturePlot(dcSRClu1, features = "Mpo", split.by = "HTO_maxID", ncol = 2)
+# Mpo 
+temp <- gene.counts.and.zero.KO[(gene.counts.and.zero.KO$pct.clu1KO >0.56) & (gene.counts.and.zero.KO$pct.clu1KO < 0.62),]
+```
+

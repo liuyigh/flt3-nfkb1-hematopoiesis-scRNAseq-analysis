@@ -1,0 +1,295 @@
+---
+title: "Flt3 Nfkb1 scRNAseq + CITE-seq + Hashtag analysis"
+output: html_notebook
+---
+V2 Manual HTO Demux
+
+* scrublet #done
+* Mt content #done
+* cell cycle regression #no
+* neo/snpclust, compare to hashtag
+* hashtag, 
+* gene/totalRNA counts
+* GateID #does not apply
+
+Mt content -> scrublet -> HTO_Demux (veryfy with neo/snpclust) -> gene/totalRNA counts -> cell cycle -> same to d5 -> aggregate?
+
+normalize -> find variable -> scale
+
+* Manually ID doublet, redo #done
+* CellCycleScoring
+* Suggest Eason to look at surface markers
+* Stat5a genes
+
+```{r echo = T, results = 'hide'}
+Sys.setenv("DISPLAY"=":0")
+library(dplyr)
+library(Seurat)
+library(data.table)
+```
+```{r}
+# Load the DC Day 3 RNA dataset
+d3.data <- Read10X(data.dir = "../rna_d3/outs/filtered_feature_bc_matrix/")
+# 8734 cells
+# Initialize the Seurat object with the raw (non-normalized) data.
+d3 <- CreateSeuratObject(counts = d3.data, project = "DC", min.cells = 3, min.features = 200)
+# 8696 cells
+```
+
+```{r}
+# The [[ operator can add columns to object metadata. This is a great place to stash QC stats
+# check the percentage of mitochondria genes
+d3[["percent.mt"]] <- PercentageFeatureSet(d3, pattern = "^mt-")
+```
+
+```{r}
+# preview a few cells and genes
+d3.data[c("mt-Nd1", "mt-Nd2", "mt-Co1"), 1:30]
+# Show QC metrics for the first 5 cells, mito genes, etc.
+head(d3@meta.data, 5)
+tail(d3@meta.data[order(d3@meta.data$percent.mt),],10)
+mtHighExample <- d3.data[,'TCGGGCATCGCATAGT']
+mtHighExample[mtHighExample != 0]
+```
+
+```{r}
+# Visualize QC metrics as a violin plot
+VlnPlot(d3, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3, pt.size = 0, log = TRUE)
+```
+```{r}
+# FeatureScatter is typically used to visualize feature-feature relationships, but can be used
+# for anything calculated by the object, i.e. columns in object metadata, PC scores etc.
+
+plot1 <- FeatureScatter(d3, feature1 = "nFeature_RNA", feature2 = "percent.mt", pt.size = 0.1)
+plot2 <- FeatureScatter(d3, feature1 = "nFeature_RNA", feature2 = "nCount_RNA", pt.size = 0.1)
+CombinePlots(plots = list(plot1, plot2))
+```
+
+```{r}
+# exclude high Mito cells
+d3 <- subset(d3, subset = percent.mt < 10)
+# 8017 cells <15, 7777 cells <10, use 10
+plot1 <- FeatureScatter(d3, feature1 = "nFeature_RNA", feature2 = "percent.mt", pt.size = 0.1)
+plot2 <- FeatureScatter(d3, feature1 = "nFeature_RNA", feature2 = "nCount_RNA", pt.size = 0.1)
+CombinePlots(plots = list(plot1, plot2))
+```
+
+```{r}
+data_to_write_out <- as.data.frame(as.matrix(d3@assays$RNA@counts))
+fwrite(x = data_to_write_out, row.names = TRUE, file = "d3mt.csv")
+
+## use scrublet python package to detect doublet in d3mt.csv
+```
+
+```{r}
+## read output from python/scrublet and add scrublet score and call to d3
+scrub <- read.table("scrublet_d3.csv", sep=",", header=TRUE)
+d3 <- AddMetaData(
+  object = d3,
+  metadata = scrub$doublet_score,
+  col.name = 'scrubScore'
+)
+d3 <- AddMetaData(
+  object = d3,
+  metadata = scrub$predicted_doublet,
+  col.name = 'scrubCall'
+)
+plot1 <- FeatureScatter(d3, feature1 = "nFeature_RNA", feature2 = "percent.mt", pt.size = 0.1)
+plot2 <- FeatureScatter(d3, feature1 = "scrubScore", feature2 = "percent.mt", pt.size = 0.1)
+CombinePlots(plots = list(plot1, plot2))
+```
+
+```{r}
+# remove doublets
+d3 <- subset(d3, subset = scrubCall == 'False') #7646 cells
+```
+
+## De-multiplex
+
+Seurat automatic algorithm did not work very well. My cells have double positive and hash2 bleeds into hash1.
+
+```{r}
+# read output from CITE-seq-count python package counted antibody barcode data. Required from Totalseq-A antibodies. For Totalseq-B and -C, they are included in cell ranger counted data.
+d3Hto <- Read10X(data.dir = "../citeseq/d3HtoCount/umi_count/", gene.column = 1)
+#Save only 2 meaningful hashtags for day 3.
+d3Hto <- d3Hto[1:2,]
+d3Hto <- d3Hto[,d3Hto[1,]<3000] # filter out large count cells
+rownames(d3Hto) <- substring(rownames(d3Hto), 1, 5) #truncate row names
+# Select cell barcodes detected by both RNA and HTO In the example datasets we have already
+joint.bcs <- intersect(colnames(d3), colnames(d3Hto))
+# Subset RNA and HTO counts by joint cell barcodes
+d3 <- d3[, joint.bcs]  #7626 cells
+d3Hto <- d3Hto[, joint.bcs]
+
+# Confirm that the HTO have the correct names
+rownames(d3Hto)
+
+# Add HTO data as a new assay independent from RNA
+d3[["HTO"]] <- CreateAssayObject(counts = d3Hto)
+# Normalize HTO data, here we use centered log-ratio (CLR) transformation
+d3 <- NormalizeData(d3, assay = "HTO", normalization.method = "CLR")
+
+FeatureScatter(d3, feature1 = "Hash1", feature2 = "Hash2")
+```
+```{r}
+### manual Demux
+
+
+# testing: Hash not a straight line, do compensation subtract 5% Hash2 from Hash1, add 0.3 to stay > 0.
+d3temp <- d3
+d3temp@assays$HTO@data[1,] <- d3temp@assays$HTO@data[1,] - 0.05 * d3temp@assays$HTO@data[2,]+0.3
+FeatureScatter(d3temp, feature1 = "Hash1", feature2= "Hash2")
+d3temp1 <- subset(d3temp, hto_Hash2 >= 0.6)
+hist(d3temp1@assays$HTO@data[1,],breaks =50) #Hash1 >0.9 test to find best cutoff
+d3temp2 <- subset(d3temp, hto_Hash1 >= 0.9)
+hist(d3temp2@assays$HTO@data[2,],breaks =50) #Hash2 >0.6 test to find best cutoff
+d3temp <- subset(d3temp, ( hto_Hash1>0.9) & (hto_Hash2>0.6), invert = TRUE) # remove double positive
+d3temp <- subset(d3temp, ( hto_Hash1<0.6) & (hto_Hash2<0.4), invert = TRUE) # remove double negative
+d3temp@assays$HTO@data[1,] <- d3temp@assays$HTO@data[1,] + 0.05 * d3temp@assays$HTO@data[2,] - 0.3 # de-compensation
+
+d3temp <- HTODemux(d3temp, assay = "HTO", positive.quantile = 0.99, init = 2) # do auto-deMux
+
+d3 <- d3temp # 7361 cells
+# Global classification results
+table(d3$HTO_classification.global)
+# Group cells based on the max HTO signal and plot
+Idents(d3) <- "HTO_maxID"
+RidgePlot(d3, assay = "HTO", features = rownames(d3[["HTO"]])[1:2], ncol = 1)
+FeatureScatter(d3, feature1 = "Hash1", feature2 = "Hash2")
+```
+
+```{r}
+## No need to run doublet or negative this time. All ready excluded by manual demux
+#Idents(d3) <- "HTO_classification.global"
+#VlnPlot(d3, features = "nCount_RNA", pt.size = 0.01, log = TRUE)
+#nega <- subset(d3, HTO_classification.global == 'Negative') #negative looks good, normalization skewed towards 2 big cells
+#doublet <- subset(d3, HTO_classification.global == 'Doublet')
+#FeatureScatter(d3, feature1 = "Hash1", feature2 = "Hash2")
+
+
+## Calculate a distance matrix using HTO
+## not useful for 2 hashtags
+# hto.dist.mtx <- as.matrix(dist(t(GetAssayData(object = d3, assay = "HTO"))))
+
+
+## Calculate tSNE embeddings with a distance matrix
+# d3 <- RunTSNE(d3, distance.matrix = hto.dist.mtx, perplexity = 100)
+# DimPlot(d3)
+
+
+## To increase the efficiency of plotting, you can subsample cells using the num.cells argument
+# HTOHeatmap(d3, assay = "HTO", ncells = 5000)
+
+# Extract the singlets, no need this round.
+# d3 <- subset(d3, idents = "Doublet", invert = TRUE)
+```
+
+## Analyse Day 3 data
+```{r}
+d3 <- NormalizeData(d3)
+# Select the top 1000 most variable features
+d3 <- FindVariableFeatures(d3, selection.method = "mean.var.plot")
+
+# Scaling RNA data, we only scale the variable features here for efficiency
+d3 <- ScaleData(d3, features = VariableFeatures(d3))
+
+# Run PCA
+d3 <- RunPCA(d3, features = VariableFeatures(d3))
+
+## Store in d3temp here
+# d3temp <- d3 #968.5Mb
+
+#View PCA
+VizDimLoadings(d3, dims = 1:4, reduction = "pca")
+
+## In particular DimHeatmap allows for easy exploration of the primary sources of heterogeneity in a dataset, and can be useful when trying to decide which PCs to include for further downstream analyses. Both cells and features are ordered according to their PCA scores. Setting cells to a number plots the ‘extreme’ cells on both ends of the spectrum, which dramatically speeds plotting for large datasets. Though clearly a supervised analysis, we find this to be a valuable tool for exploring correlated feature sets.
+
+DimHeatmap(d3, dims = 1:15, cells = 500, balanced = TRUE)
+```
+
+PC_ 1 
+Positive:  Anxa1, Lyz2, Pglyrp1, Wfdc21, Lcn2, Pygl, Prdx5, Ngp, S100a8, Ifitm6 
+	   Camp, Cd177, C3, Syne1, Ltf, Ckap4, Hp, Itgam, Mcemp1, Chil3 
+	   Gsr, Ltb4r1, Trem3, Rflnb, Chil1, Dstn, Igsf6, Gda, Cybb, Msrb1 
+Negative:  Ighm, Pafah1b3, Cd79b, Ptprcap, Chchd10, Ly6d, Vpreb3, Ebf1, Cd79a, Atp1b1 
+	   Foxp1, Cnp, Sox4, Rhoh, Bach2, Pkig, Mzb1, Fcrla, Jund, N4bp2 
+	   Arl5c, Smarca4, Bcl7a, Spib, Blnk, Ptp4a3, Rplp1, Cecr2, Pax5, Akap12 
+PC_ 2 
+Positive:  Plac8, Ms4a6c, Rps2, Rplp1, Ly6a, Ctss, Cst3, Ctsh, Ccnd1, Pld4 
+	   Tmem176b, Fth1, Ccr2, H2-DMb1, H2-Ab1, Ms4a4c, H2-Aa, H2-Eb1, Tmem176a, Ahnak 
+	   Crip1, Cd74, S100a4, Ms4a6b, Ctsb, Ctsc, Wfdc17, Mpeg1, Klrd1, Ckb 
+Negative:  Vpreb3, Ebf1, Cd79a, Cd24a, Chchd10, Cd79b, Cecr2, Pax5, Mgst1, Akap12 
+	   Pou2af1, Bach2, Rag1, Mzb1, Klf2, N4bp2, Fam53b, Rhoh, S100a8, Camp 
+	   Ighm, H3f3a, C1galt1, Wfdc21, Lcn2, Ngp, Fcrla, Ltf, Igkc, Bcl7a 
+PC_ 3 
+Positive:  Prtn3, Ctsg, Fabp5, Mki67, Top2a, Rps2, Hist1h1b, Hist1h2ap, Myl10, Mpo 
+	   Hist1h2ae, Kcnq1ot1, Gm26917, Ms4a3, Myb, Cd93, Ctr9, Cenpf, Elane, Nkg7 
+	   Rplp1, Ube2c, Plac8, Alas1, Adgrg1, F13a1, Serpinb1a, Hist1h1e, Thbs1, Cd69 
+Negative:  Cd74, Rnase6, H2-Aa, H2-Eb1, Jaml, Pltp, Ctsh, H2-Ab1, Irf7, S100a6 
+	   Ccr9, Siglech, Btg1, Ctsl, Fyb, Ifi27l2a, Pld4, Grn, Ctss, Ptms 
+	   Mpeg1, Cd7, Slamf9, Tyrobp, Fyn, Pacsin1, Slfn5, Rell1, Klrd1, Scimp 
+PC_ 4 
+Positive:  Clec4a3, Clec4a1, Ms4a4c, Pid1, Csf1r, Ms4a6b, Wfdc17, S100a4, Tgfbi, Ifi204 
+	   Ifitm3, Ms4a6c, Junb, Ifitm2, Ly6i, Trps1, Ccr2, Rgs2, Emilin2, Cx3cr1 
+	   Tlr2, Ccl9, Tnip3, Ccl6, Lrp1, Cxcl16, Ifitm1, Cd300c2, Tnfrsf1b, Il1b 
+Negative:  Siglech, Cox6a2, Ccr9, Runx2, Ctsl, Pacsin1, P2ry14, Upb1, Bcl11a, Rpgrip1 
+	   Pltp, Smim5, Lag3, Cd300c, Tcf4, Cd7, Dntt, Prkca, Tsc22d1, Gm21762 
+	   AC140186.1, Gm5547, Sh3bgr, Lair1, Fyn, Mctp2, Klk1, Rell1, Card11, Ccnd1 
+PC_ 5 
+Positive:  Cebpb, Csf1r, Psap, Apoe, F10, Ly6i, F13a1, Cx3cr1, Emilin2, Zeb2 
+	   Fth1, Pla2g7, Hp, Ctsb, Clec4e, Lrp1, Ctsc, Tnfrsf1b, Elane, Trf 
+	   Lair1, Adgre4, Mpeg1, Ctsg, Prtn3, Ccr2, Cd14, Tlr2, Hmox1, Mpo 
+Negative:  Il4i1, Tbc1d4, Ccl5, Traf1, Fscn1, Ccr7, Cd83, Basp1, Serpinb9, Cxcl16 
+	   Bcl2a1d, Etv3, Serpinb6b, Relb, Klrk1, Bcl2a1b, Rgs1, Ccl22, H2-Eb1, Tmem176a 
+	   H2-Aa, Grasp, Ciita, Apol7c, Klrd1, Tmem176b, Actn1, Tspan3, H2-Ab1, Id2 
+
+
+FeaturePlot(d3, features = "Mki67", split.by = "HTO_maxID")
+
+features <- c("Abeta","Atxn1","Bcl2","Ccr9","Cd1","Cd14","Cd19","Cd209","Cd24","Cd34","Cd3e","Cd49b","Cdk4","Cdk9","Ciita","Csf1","Csf1r","Cyld","Ebf1","Flt3","Flt3l","Gr1","H2-Eb1","Id2","Ighd","Ighm","Ikbkb","Il12a","Il7r","Isg15","Itgam","Itgax","Kit","Ly6c","Ly6g","Ly76","Map3k8","Mki67","Mpo","Nfkb1","Nfkb2","Nfkbia","Nfkbib","Nfkbie","Pax5","Ptprc","Rel","Rela","Relb","Sca1","Siglech","Slamf1","Tcf3","Tlr2","Tlr9","Tnfaip3","Bst2","Ms4a1","Tnfrsf13b","Bcl11a","Irf7","Ccnd3")
+
+```{r}
+## Determine the ‘dimensionality’ of the dataset
+# JackStraw procedure
+d3 <- JackStraw(d3, num.replicate = 100, dims = 50)
+d3 <- ScoreJackStraw(d3, dims = 1:40)
+
+# 'Significant' PCs will show a strong enrichment of features with low p-values (solid curve above the dashed line). 
+JackStrawPlot(d3, dims = 1:40)
+
+```
+```{r}
+ElbowPlot(d3, ndims = 40)
+```
+
+```{r}
+# to restore d3
+#d3 <- d3temp  
+# We select the top 10 PCs for clustering and tSNE based on PCElbowPlot
+d3 <- FindNeighbors(d3, reduction = "pca", dims = 1:29)
+d3 <- FindClusters(d3, resolution = 2, verbose = FALSE)
+d3 <- RunTSNE(d3, reduction = "pca", dims = 1:20)
+
+# Projecting singlet identities on TSNE visualization
+DimPlot(d3, group.by = "HTO_maxID")
+```
+```{r}
+FeaturePlot(d3, features = "Itgax", split.by = "HTO_maxID")
+```
+
+
+## load day 3 antibody data, unique to totalseq-A, already loaded if totalseq-B or -C.
+```{r}
+d3Adt <- Read10X(data.dir = "../citeseq/d3AdtCount/umi_count/", gene.column = 1)
+d3Adt <- d3Adt[1:9,]
+#d3Adt <- d3Adt[,d3Hto2[1,]<3000] # filter out large count cells
+rownames(d3Adt) <- gsub('.{16}$', '', rownames(d3Adt))
+rownames(d3Adt) <- paste0('Adt.', rownames(d3Adt))
+joint.bcs <- intersect(colnames(d3), colnames(d3Adt))
+d3Adt <- d3Adt[, joint.bcs]
+d3 <- d3[, joint.bcs]
+d3[["ADT"]] <- CreateAssayObject(counts = d3Adt)
+d3 <- NormalizeData(d3, assay = "ADT", normalization.method = "CLR")
+d3 <- ScaleData(d3, assay = "ADT")
+RidgePlot(d3, features = c("Adt.CD11c", "Adt.CD11b", "Adt.B220",  "Adt.Gr1",   "Adt.MHCII", "Adt.SiglecH", "Adt.Sirpa", "Adt.CD24",  "Adt.F480"), ncol = 2)
+```

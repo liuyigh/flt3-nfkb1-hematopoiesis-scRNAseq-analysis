@@ -1,0 +1,668 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(tradeSeq)
+library(RColorBrewer)
+library(SingleCellExperiment)
+library(slingshot)
+
+#library(BUSpaRse)
+library(tidyverse)
+library(tidymodels)
+library(Seurat)
+
+library(scales)
+library(viridis)
+library(Matrix)
+
+library(ggplot2)
+library(patchwork)
+library(dplyr)
+
+library(reshape2)
+library(gtools)
+library(ggVennDiagram)
+
+suppressPackageStartupMessages({
+  library(slingshot); library(SingleCellExperiment)
+  library(RColorBrewer); library(scales)
+  library(viridis); library(UpSetR)
+  library(pheatmap); library(msigdbr)
+  library(fgsea); library(knitr)
+  library(ggplot2); library(gridExtra)
+})
+```
+
+```{r}
+plotGeneCount(curve = sds, clusters = dcSubReg$seurat_clusters)
+```
+
+```{r}
+### Based on Slingshot object
+set.seed(6)
+counts <- as.matrix(dcSubReg[['RNA']]@scale.data)
+dcSubReg$sample <- ifelse(dcSubReg$HTO_maxID %in% c('Hash1', 'Hash2'), 'd3' , 'd5')
+dcSubReg$genotype <- ifelse(dcSubReg$HTO_maxID %in% c('Hash1', 'Hash3'), 'wt' , 'ko')
+conditions4 <- as.factor(dcSubReg$HTO_maxID)
+conditions2 <- factor(dcSubReg$genotype, levels=c('wt','ko'))
+## evaluateK() not yet working in conditions branch
+# icMat <- evaluateK(counts = counts, sds = sds, k = 3:10, nGenes = 200, plot = TRUE, conditions = conditions) 
+#print(icMat[1:2, ])
+set.seed(7)
+register(BatchtoolsParam(workers=2))
+BPPARAM <- BiocParallel::bpparam()
+pseudotime <- slingPseudotime(sds, na = FALSE)
+sce <- fitGAM(counts = counts, pseudotime = pseudotime, cellWeights = curveWeight, nknots = 36, conditions = conditions2, parallel=FALSE)
+```
+
+## 2020.07.28 along side google cloud
+
+```{r}
+### Based on Slingshot object
+set.seed(3)
+BPPARAM <- BiocParallel::bpparam()
+BPPARAM$workers <- 8
+setGAM = vector()
+for (i in c(1:10)) {
+  lessthen10 <- degls[[i]][degls[[i]]$p_val_adj<=0.5,]
+  print(nrow(lessthen10))
+  setGAM <- union(setGAM, rownames(lessthen10))
+}
+
+counts <- as.matrix(dcSubReg[['RNA']]@counts[setGAM,])
+#conditions4 <- as.factor(dcSubReg$HTO_maxID)
+conditions2 <- factor(dcSubReg$genotype, levels=c('wt','ko'))
+icMat <- evaluateK(counts = counts,
+                   pseudotime = pseudotime,
+                   cellWeights = cw,
+                   conditions = conditions2,
+                   nGenes = 255,BPPARAM = BPPARAM,parallel=TRUE,
+                   k = 3:7)
+
+sce <- fitGAM(counts = counts, 
+              sds=sds,
+              nknots = 6, 
+              conditions = conditions2, 
+              parallel=FALSE) #, genes = 1:10
+## evaluateK() not yet working in conditions branch
+# icMat <- evaluateK(counts = counts, sds = sds, k = 3:10, nGenes = 200, plot = TRUE, conditions = conditions) 
+#print(icMat[1:2, ])
+set.seed(7)
+register(BatchtoolsParam(workers=2))
+BPPARAM <- BiocParallel::bpparam()
+pseudotime <- slingPseudotime(sds, na = FALSE)
+sce <- fitGAM(counts = counts, pseudotime = pseudotime, cellWeights = curveWeight, nknots = 36, conditions = conditions2, parallel=FALSE)
+```
+```{r}
+library(tradeSeq)
+assocRes <- associationTest(sce, lineages = TRUE, l2fc = log2(2))
+wtGenes <-  rownames(assocRes)[
+  which(p.adjust(assocRes$pvalue_lineage1_conditionwt, "fdr") <= 0.05)
+]
+koGenes <-  rownames(assocRes)[
+  which(p.adjust(assocRes$pvalue_lineage1_conditionko, "fdr") <= 0.05)
+]
+
+length(wtGenes)
+
+## [1] 2398
+
+length(koGenes)
+
+## [1] 1013
+
+UpSetR::upset(fromList(list(wt = wtGenes, ko = koGenes)))
+```
+
+```{r}
+### based on mean smoother
+yhatSmooth <- predictSmooth(sce, gene = wtGenes, nPoints = 50, tidy = FALSE)
+heatSmooth <- pheatmap(t(scale(t(yhatSmooth[, 1:50]))),
+                       cluster_cols = FALSE,
+                       show_rownames = FALSE,border_color = NA,
+                       show_colnames = FALSE)
+```
+
+```{r}
+plotSmoothers(sce, assays(sce)$counts, gene = "Ctse", alpha = 0, border = TRUE) + ggtitle("Ctse") + ylim(0, 2)
+```
+
+```{r}
+plotSmoothers(sce, assays(sce)$counts, gene = "Cd7", alpha = 1, border = TRUE) + ggtitle("Cd7")
+```
+
+```{r}
+plotSmoothers(sce, assays(sce)$counts, gene = "Il12a", alpha = 0, border = TRUE) + ggtitle("Il12a") + ylim(0, 1.5)
+```
+
+```{r}
+plotSmoothers(sce, assays(sce)$counts, gene = "Mid1", alpha = 0, border = TRUE) + ggtitle("Mid1") + ylim(0, 0.5)
+```
+```{r}
+plotSmoothers(sce, assays(sce)$counts, gene = "Slamf1", alpha = 1, border = TRUE) + ggtitle("Slamf1") + ylim(0, 1) + NoLegend() +scale_color_manual(values = c("orange", "darkseagreen3", "red","blue","orange", "darkseagreen3", "red","blue"))  
+```
+
+```{r}
+plotSmoothers(sce, assays(sce)$counts, gene = "Serpina3g", alpha = 0, border = TRUE) + ggtitle("H2-K1")
+```
+
+```{r}
+plotSmoothers(sce, assays(sce)$counts, gene = "Degs1", alpha = 0, border = TRUE) + ggtitle("Degs1") + ylim(0, 1.1)
+```
+
+
+```{r}
+condRes <- conditionTest(sce, l2fc = log2(2))
+condRes$padj <- p.adjust(condRes$pvalue, "fdr")
+mean(condRes$padj <= 0.05, na.rm = TRUE)
+
+sum(condRes$padj <= 0.05, na.rm = TRUE)
+
+conditionGenes <- rownames(condRes)[condRes$padj <= 0.05]
+conditionGenes <- conditionGenes[!is.na(conditionGenes)]
+```
+
+```{r}
+### based on mean smoother
+yhatSmooth <- predictSmooth(sce, gene = conditionGenes, nPoints = 50, tidy = FALSE)
+#yhatSmooth <- yhatSmooth %>% unite(newcol, lineage, condition, time)
+#yhatSmooth <- dcast(yhatSmooth, gene ~ newcol, value.var = 'yhat')
+
+heatSmooth_TGF <- pheatmap(t(scale(t(yhatSmooth[, 51:100]))),
+  cluster_cols = FALSE,border_color = NA,
+  show_rownames = FALSE, show_colnames = FALSE, main = "WT", legend = FALSE,
+  silent = TRUE
+)
+
+matchingHeatmap_mock <- pheatmap(t(scale(t(yhatSmooth[heatSmooth_TGF$tree_row$order, 1:50]))),
+  cluster_cols = FALSE, cluster_rows = FALSE,border_color = NA,
+  show_rownames = TRUE, show_colnames = FALSE, main = "KO",
+  legend = FALSE, silent = TRUE
+)
+library(gridExtra)
+grid.arrange(heatSmooth_TGF[[4]], matchingHeatmap_mock[[4]], ncol = 2)
+```
+
+### combine highly variable genes and degs, redo fit
+### 2020.08.05 use normalized data instead.
+# raw counts or scale.data is not proper for expression analysis
+# REF: https://broadinstitute.github.io/KrumlovSingleCellWorkshop2020/data-wrangling-scrnaseq-1.html
+# REF: https://github.com/satijalab/seurat/issues/62
+
+### __Tradeseq__ does its own normalization, so use raw counts
+## use full dataset
+## use genes to only fit subset of genes
+```{r}
+setGAMp <- union(VariableFeatures(dcSubReg), setGAM)
+# setGAMp <- setGAMp [! setGAMp %in% c("1110008F13Rik",
+#                           "1110008P14Rik",
+#                           "1810037I17Rik",
+#                           "4833445I07Rik",
+#                           "4930523C07Rik")]
+
+counts <- as.matrix(dcSubReg[['RNA']]@counts[,])
+
+setGAMp <- make.names(setGAMp, unique = TRUE)
+setGAM <- make.names(setGAM, unique = TRUE)
+row.names(counts) <- make.names(row.names(counts), unique = TRUE)
+`%notin%` <- Negate(`%in%`)
+
+temp1 <- subset(counts, row.names(counts) %in% setGAMp)
+temp2 <- subset(counts, row.names(counts) %notin% setGAMp)
+
+counts <- rbind(temp1, temp2)
+
+sce <- fitGAM(counts = counts, 
+              sds=sds,
+              nknots = 6, 
+              conditions = conditions2, 
+              parallel=FALSE,
+              genes = 1:1140)
+## elapsed=04h 37m 60s
+```
+
+
+
+```{r}
+condRes <- conditionTest(sce, l2fc = log2(1.10), global = TRUE, pairwise = TRUE)
+condRes$padj <- p.adjust(condRes$pvalue, "fdr")
+condRes$padj4 <- p.adjust(condRes$pvalue_lineage4, "fdr")
+mean(condRes$padj <= 0.05, na.rm = TRUE)
+
+sum(condRes$padj <= 0.05, na.rm = TRUE)
+
+conditionGenes <- rownames(condRes)[condRes$padj <= 0.05]
+conditionGenes <- conditionGenes[!is.na(conditionGenes)]
+
+conditionGenes4 <- rownames(condRes)[condRes$padj4 <= 1e-3]
+
+condGene4 <- intersect(conditionGenes4, make.names(setDEGpdclo, unique=TRUE))
+```
+
+```{r}
+### based on mean smoother
+yhatSmooth <- predictSmooth(sce, gene = condGene4, nPoints = 50, tidy = TRUE)
+yhatSmooth4 <- subset(yhatSmooth, yhatSmooth$lineage == 4)
+yhatSmooth4 <- yhatSmooth4 %>% unite(newcol, condition, time)
+yhatSmooth4 <- yhatSmooth4[,2:4]
+yhatSmooth4 <- dcast(yhatSmooth4, gene ~ newcol, value.var = 'yhat')
+row.names(yhatSmooth4) <- yhatSmooth4$gene
+yhatSmooth4 <- yhatSmooth4[,mixedsort(colnames(yhatSmooth4))]
+yhatSmooth4 <- yhatSmooth4[-1]
+
+maxs <- apply(t(yhatSmooth4), 2, max)
+mins <- apply(t(yhatSmooth4), 2, min)
+test <- scale(t(yhatSmooth4), center = mins, scale = maxs - mins)
+
+heatSmooth <- pheatmap(t(test),
+  cluster_cols = FALSE, border_color = NA, color = colorRampPalette(brewer.pal(n = 9, name =
+  "OrRd"))(100),
+  show_rownames = TRUE, show_colnames = FALSE, main = "Lineage 4", legend = FALSE,
+  silent = TRUE
+)
+
+genes0810 <- c(
+ 'Rnpep',
+ 'Dbi',
+ 'Emb',
+ 'Pim1',
+ 'Slamf1',
+ 'Gm47283',
+ 'Mid1',
+ 'Cd34',
+ 'Wdfy1',
+ 'Il12a',
+ 'Gm35082',
+ 'Jund',
+ 'Lgals1',
+ 'Cd7',
+ 'Ly6a',
+ 'Rgs18',
+ 'Ifi27l2a',
+ 'Ppfia4',
+ 'Btg2',
+ 'Cd82')
+
+yhatSmooth <- predictSmooth(sce, gene = genes0810, nPoints = 50, tidy = TRUE)
+yhatSmooth4 <- subset(yhatSmooth, yhatSmooth$lineage == 4)
+yhatSmooth4 <- yhatSmooth4 %>% unite(newcol, condition, time)
+yhatSmooth4 <- yhatSmooth4[,2:4]
+yhatSmooth4 <- dcast(yhatSmooth4, gene ~ newcol, value.var = 'yhat')
+row.names(yhatSmooth4) <- yhatSmooth4$gene
+yhatSmooth4 <- yhatSmooth4[,mixedsort(colnames(yhatSmooth4))]
+yhatSmooth4 <- yhatSmooth4[-1]
+yhatSmooth4 <- yhatSmooth4[genes0810,]
+
+write.csv(yhatSmooth4, "~/scRNAseq/analysis/data/yhat4.csv")
+
+maxs <- apply(t(yhatSmooth4), 2, max)
+mins <- apply(t(yhatSmooth4), 2, min)
+test <- scale(t(yhatSmooth4), center = mins, scale = maxs - mins)
+
+heatSmooth <- pheatmap(t(test),
+  cluster_cols = FALSE, cluster_rows = FALSE, border_color = NA, color = colorRampPalette(brewer.pal(n = 20, name =
+  "OrRd"))(100),
+  show_rownames = TRUE, show_colnames = FALSE, main = "Lineage 4", legend = FALSE,
+  silent = TRUE
+)
+
+heatSmooth
+# heatSmooth_TGF <- pheatmap(t(scale(t(yhatSmooth4[, 51:100]))),
+#   cluster_cols = FALSE,border_color = NA,
+#   show_rownames = FALSE, show_colnames = FALSE, main = "WT", legend = FALSE,
+#   silent = TRUE
+# )
+# 
+# matchingHeatmap_mock <- pheatmap(t(scale(t(yhatSmooth[heatSmooth_TGF$tree_row$order, 1:50]))),
+#   cluster_cols = FALSE, cluster_rows = FALSE,border_color = NA,
+#   show_rownames = TRUE, show_colnames = FALSE, main = "KO",
+#   legend = FALSE, silent = TRUE
+# )
+# library(gridExtra)
+# grid.arrange(heatSmooth_TGF[[4]], matchingHeatmap_mock[[4]], ncol = 2)
+```
+
+```{r}
+venn4 <- rownames(condRes)[condRes$pvalue_lineage4 <= 1e-10]
+venn3 <- rownames(condRes)[condRes$pvalue_lineage3 <= 1e-10]
+venn2 <- rownames(condRes)[condRes$pvalue_lineage2 <= 1e-10]
+venn1 <- rownames(condRes)[condRes$pvalue_lineage1 <= 1e-10]
+ggVennDiagram(list(A=venn1, B=venn2, C=venn3, D=venn4),
+              category.names = c("cDC","monocytes","Neutrophils", "pDC"))
+```
+
+```{r}
+venn4 <- rownames(condRes)[condRes$pvalue_lineage4 <= 1e-5]
+venn3 <- rownames(condRes)[condRes$pvalue_lineage3 <= 1e-5]
+venn2 <- rownames(condRes)[condRes$pvalue_lineage2 <= 1e-5]
+venn1 <- rownames(condRes)[condRes$pvalue_lineage1 <= 1e-5]
+ggVennDiagram(list(A=venn1, B=venn2, C=venn3, D=venn4),
+              category.names = c("cDC","monocytes","Neutrophils", "pDC"))
+```
+
+```{r}
+venn4 <- rownames(condRes)[condRes$pvalue_lineage4 <= 1e-15]
+venn3 <- rownames(condRes)[condRes$pvalue_lineage3 <= 1e-15]
+venn2 <- rownames(condRes)[condRes$pvalue_lineage2 <= 1e-15]
+venn1 <- rownames(condRes)[condRes$pvalue_lineage1 <= 1e-15]
+ggVennDiagram(list(A=venn1, B=venn2, C=venn3, D=venn4),
+              category.names = c("cDC","monocytes","Neutrophils", "pDC"))
+```
+
+> setdiff(venn4, union(union(venn1, venn2), venn3))
+ [1] "Cd44"    "Il12a"   "Phgdh"   "Lmo4"    "Khk"     "Igkc"    "Trim30d" "Cd24a"   "Myo5a"   "H2.Ab1"  "H2.Aa"   "H2.Eb1" 
+[13] "Cd74" 
+
+> setdiff(venn1, union(union(venn4, venn2), venn3))
+ [1] "Nfkb1"     "Marcksl1"  "Spib"      "Casp4"     "Il18"      "Syngr2"    "Sox4"      "Acyp1"     "Serpina3g" "Ly6e"     
+[11] "Pim1"  
+
+## Andersson et al overlap
+```{r}
+convertHumanGeneList <- function(x){
+require("biomaRt")
+human = useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+mouse = useMart("ensembl", dataset = "mmusculus_gene_ensembl")
+genesV2 = getLDS(attributes = c("hgnc_symbol"), filters = "hgnc_symbol", values = x , mart = human, attributesL = c("mgi_symbol"), martL = mouse, uniqueRows=T)
+humanx <- unique(genesV2[, 2])
+# Print the first 6 genes found to the screen
+print(head(humanx))
+return(humanx)
+}
+anderDEG <- read.csv('~/scRNAseq/analysis/DEGs/DEG-CCRegSub/Andersson_et_al/andersson_1e-6.csv')
+muanderDEG <- convertHumanGeneList(unlist(anderDEG, use.names=FALSE))
+
+anderR2 <- read.csv('~/scRNAseq/analysis/DEGs/DEG-CCRegSub/Andersson_et_al/andersson_R2_gt_0.5.csv')
+muanderR2 <- convertHumanGeneList(unlist(anderR2, use.names=FALSE))
+
+setGAM4ven = vector()
+for (i in c(1:10)) {
+  lessthen10 <- degls[[i]][degls[[i]]$p_val_adj<=0.000001,]
+  print(nrow(lessthen10))
+  setGAM4ven <- union(setGAM4ven, rownames(lessthen10))
+}
+ggVennDiagram(list(A=muanderDEG, B=muanderR2, C=setGAM4ven),
+              category.names = c("AnderDEG","AnderR2","scRNAseq"))
+anderNsc <- intersect(intersect(muanderDEG, muanderR2), setGAM4ven)
+# "Nme1"   "Blmh"   "Rnf149" "Stom"   "Zfp516" "Nadk"   "Degs1"  "Srm"    "Mettl1" "Cmtm7" 
+condRes[anderNsc,]
+```
+
+```{r}
+venn4 <- rownames(condRes)[condRes$pvalue_lineage4 <= 1e-2]
+venn3 <- rownames(condRes)[condRes$pvalue_lineage3 <= 1e-2]
+venn2 <- rownames(condRes)[condRes$pvalue_lineage2 <= 1e-2]
+venn1 <- rownames(condRes)[condRes$pvalue_lineage1 <= 1e-2]
+vennall <- union(union(venn1, venn2), union(venn3, venn4))
+write.csv2(vennall, file ='~/scRNAseq/analysis/DEGs/DEG-CCRegSub/setGAM4venn.csv', row.names=FALSE, quote = FALSE)
+```
+
+
+## cluster 0 (pDC), 2(cDC), 4(MDP)
+> degls[[1]]['Degs1',]
+             p_val avg_logFC pct.1 pct.2    p_val_adj
+Degs1 2.306612e-15 0.2484654 0.356 0.189 3.907862e-11
+> degls[[3]]['Degs1',]
+             p_val avg_logFC pct.1 pct.2    p_val_adj
+Degs1 2.046098e-08 0.1737898 0.568 0.438 0.0003466498
+> degls[[5]]['Degs1',]
+             p_val avg_logFC pct.1 pct.2   p_val_adj
+Degs1 2.451544e-07 0.1020663 0.774  0.66 0.004153406
+
+## Conditions imbalance
+
+```{r}
+cw <- curveWeight
+assignment <- apply(cw, 1, which.max)
+conditions2 <- factor(dcSubReg$genotype, levels=c('wt','ko'))
+require(mgcv, quietly = TRUE)
+
+t1 <- pt[,1]
+t2 <- pt[,4]
+l1 <- as.numeric(assignment == 1)
+l2 <- as.numeric(assignment == 4)
+m <- gam(conditions2 ~ s(t1, by=l1, id=1) + s(t2, by=l2, id=1),
+         family = quasibinomial(link = "logit"))
+# plot(m, pages=1)
+layout(matrix(1:2,nrow=1))
+m1plot <- plot(m, select=1, shade=TRUE, main='Lineage 1',
+     xlab="Pseudotime", ylab="Logit Prob(KO)")
+m2plot <- plot(m, select=2, shade=TRUE, main='Lineage 4',
+     xlab="Pseudotime", ylab="Logit Prob(KO)")
+layout(1)
+mplot <- plot(m)
+
+
+mdata<-cbind(data.frame(mplot[[1]]$x), data.frame(mplot[[1]]$fit), data.frame(mplot[[1]]$se),data.frame(mplot[[2]]$x), data.frame(mplot[[2]]$fit), data.frame(mplot[[2]]$se))
+colnames(mdata)<- c('t1','fit1','se1','t2','fit2','se2')
+mdata$min1 <- mdata$fit1-mdata$se1
+mdata$max1 <- mdata$fit1+mdata$se1
+mdata$min2 <- mdata$fit2-mdata$se2
+mdata$max2 <- mdata$fit2+mdata$se2
+
+ggplot(mdata,aes(x=t1,y=fit1))+geom_line(aes(x=t1,y=fit1))+
+  geom_ribbon(aes(ymin = min1, ymax = max1), fill="#3399FF", alpha=0.5)+
+  geom_line(aes(x=t2,y=fit2))+
+  geom_ribbon(aes(ymin = min2, ymax = max2), fill="#CC6666", alpha=0.5)
+```
+```{r}
+
+# try tidymv and predict smooth data for ggplot, abandon since mgcv has the data
+summary(m)
+library(tidymv)
+model_p <- predict_gam(m)
+model_p %>%
+  ggplot(aes(t2, fit)) +
+  geom_smooth_ci(l2)
+
+#tidymhv plot_smooth
+plot_smooths(
+  model = m,
+  series = l1,
+  comparison = conditions2
+)
+
+# try mgcviz
+library(mgcViz)
+library(tidymv)
+mv <- getViz(m)
+o <- plot( sm(mv, 1))
+o + l_fitLine(colour = "red") + l_rug(mapping = aes(x=x, y=y), alpha = 0.8) +
+    l_ciLine(mul = 5, colour = "blue", linetype = 2) + 
+    l_points(shape = 19, size = 1, alpha = 0.1) + theme_classic()
+
+
+## ---- fig.height=4, fig.width=8, echo = FALSE---------------------------------
+n <- nrow(linWeigh); L <- ncol(slingPseudotime(sds))
+noise <- runif(n, -.1,.1)
+plot(as.numeric(slingPseudotime(sds)), rep(1:L, each=n)+noise,pch=16, col = brewer.pal(9,'Set1')[conditions2], axes=FALSE, xlab='Pseudotime', ylab='Lineage', las=1)
+axis(1); axis(2, at=1:L, las=1)
+layout(matrix(1:2,nrow=1))
+boxplot(slingPseudotime(sds)[,1] ~ conditions2, col = brewer.pal(3,'Set1')[1:2], main = 'Lineage 1', xlab='Condition', ylab='Pseudotime', las=1, pch = 16)
+boxplot(slingPseudotime(sds)[,2] ~ conditions2, col = brewer.pal(3,'Set1')[1:2], main = 'Lineage 2', xlab='Condition', ylab='Pseudotime', las=1, pch = 16)
+layout(1)
+
+ks.test(slingPseudotime(sds)[conditions2=='wt',2], slingPseudotime(sds)[conditions2=='ko',2])
+
+ptAs <- c() #assigned pseudotime
+for(ii in 1:nrow(pt)) ptAs[ii] <- pt[ii,assignment[ii]] 
+cond1 <- factor(conditions2[assignment == 1])
+t1 <- ptAs[assignment == 1]
+m1 <- glm(cond1 ~ t1, family = quasibinomial(link = "logit"))
+summary(m1)
+plot(m1)
+
+cond2 <- factor(conditions2[assignment == 4])
+t2 <- ptAs[assignment == 4]
+m2 <- glm(cond2 ~ t2, family = quasibinomial(link = "logit"))
+summary(m2)
+
+m1s <- mgcv::gam(cond1 ~ s(t1), family="quasibinomial")
+summary(m1s)
+plot(m1s)
+
+m2s <- mgcv::gam(cond2 ~ s(t2), family="quasibinomial")
+summary(m2s)
+plot(m2s)
+
+## ----echo=FALSE---------------------------------------------------------------
+layout(matrix(1:2,nrow=1))
+plot(m1s, shade = TRUE, main = "Lineage 1", 
+     xlab="Pseudotime", ylab="Logit Prob(B)", scheme=0)
+plot(m2s, shade = TRUE, main = "Lineage 2",
+     xlab="Pseudotime", ylab="Logit Prob(B)")
+layout(1)
+```
+
+```{r}
+m1plot<-plot(m1s, shade = TRUE, main = "Lineage 1", 
+     xlab="Pseudotime", ylab="Logit Prob(B)", scheme=0)
+m2plot<-plot(m2s, shade = TRUE, main = "Lineage 2",
+     xlab="Pseudotime", ylab="Logit Prob(B)")
+
+mdata2<-cbind(data.frame(m1plot[[1]]$x), data.frame(m1plot[[1]]$fit), data.frame(m1plot[[1]]$se),data.frame(m2plot[[1]]$x), data.frame(m2plot[[1]]$fit), data.frame(m2plot[[1]]$se))
+colnames(mdata2)<- c('t1','fit1','se1','t2','fit2','se2')
+mdata2$min1 <- mdata2$fit1-mdata2$se1
+mdata2$max1 <- mdata2$fit1+mdata2$se1
+mdata2$min2 <- mdata2$fit2-mdata2$se2
+mdata2$max2 <- mdata2$fit2+mdata2$se2
+ggplot(mdata2,aes(x=t1,y=fit1))+geom_line(aes(x=t1,y=fit1))+
+  geom_ribbon(aes(ymin = min1, ymax = max1), fill='grey', alpha=0.3)+
+  geom_line(aes(x=t2,y=fit2))+
+  geom_ribbon(aes(ymin = min2, ymax = max2), fill='red', alpha=0.3)
+```
+
+## Use Seurat Findmarkers and future multicore
+
+```{r}
+saveRDS(dcSubReg, '~/scRNAseq/analysis/data/dcSubReg-for-future.2020.06.07.rds')
+```
+
+### Code for __!!!R console !!!__
+```{r}
+library(Seurat)
+library(future)
+library(dplyr)
+dc <- readRDS('dcSubReg-for-future.2020.06.07.rds')
+# Enable parallelization
+plan("multiprocess", workers = 16)
+degls <- vector("list", length = 10)
+for (i in 0:9) {
+    degls[[i+1]] <- FindMarkers(dc, ident.1 = "wt", ident.2 = "ko", group.by = 'genotype', subset.ident = i, min.pct = 0.10, logfc.threshold = 0.10)
+}
+saveRDS(degls, 'degls-2020-06-07.rds')
+```
+
+```{r}
+setDEG = vector()
+for (i in 1:10) {
+  lessthen10 <- degls[[i]][degls[[i]]$p_val_adj<=1e-13,]
+  print(nrow(lessthen10))
+  setDEG <- union(setDEG, rownames(lessthen10))
+}
+```
+
+```{r}
+DoHeatmap(subset(dcSubReg, idents = 'ko'), features = setDEG, size = 3)
+```
+
+```{r}
+dcDEG <- subset(x = dcSubReg, features = setDEG)
+```
+
+```{r}
+dc255 <- readRDS("~/scRNAseq/analysis/data/dc255.rds")
+ave <- AverageExpression(dc255, add.ident = 'cluster', return.seurat = TRUE)
+ave2 <- ave[[1]]
+ave2 <- ave2[ , order(names(ave2))]
+
+```
+
+```{r}
+library(gridExtra)
+library(ggplot2)
+#remotes::install_github("tleonardi/ggheatmap")
+library(ggheatmap)
+plots <- ggheatmap(ave2%>%mutate_if(is.numeric,scale), orderCol = F, colorPalette = "PiYG")
+
+
+```
+
+```{r}
+library(Seurat)
+dc <- readRDS('dcSubReg-for-future.2020.06.07.rds')
+degls <- readRDS('~/scRNAseq/analysis/data/degls-2020-06-07.rds')
+setDEG = vector()
+for (i in 1:10) {
+  lessthen10 <- degls[[i]][degls[[i]]$p_val_adj<=1e-13,]
+  print(nrow(lessthen10))
+  setDEG <- union(setDEG, rownames(lessthen10))
+}
+setDEG
+new.cluster.ids <- c("pDC", "HSPC1", "cDC", "monocytes", "Progenitor", "HSPC2 (Neutro)", "Neutrophil", "HSPC3 (T Blast)",  "cd8DC","Mast cell")
+Idents(dcSubReg) <- "seurat_clusters"
+names(new.cluster.ids) <- levels(dcSubReg)
+dcSubReg <- RenameIdents(dcSubReg, new.cluster.ids)
+dc72 <- dcSubReg[['RNA']]@data[setDEG,]
+dc72 <- CreateSeuratObject(dc72)
+genotype <- dcSubReg@meta.data[, 'genotype']
+dc72 <- AddMetaData(object = dc72, metadata = genotype, col.name = 'genotype')
+Idents(dc72) <- 'genotype'
+cluster <- dcSubReg@meta.data[, 'rnaClusterID']
+cluster
+dc72 <- AddMetaData(object = dc72, metadata = cluster, col.name = 'cluster')
+clusterID <- dcSubReg@active.ident
+dc72 <- AddMetaData(object = dc72, metadata = clusterID, col.name = 'clusterID')
+dc72wt <- subset(dc72, idents = 'wt')
+dc72ko <- subset(dc72, idents = 'ko')
+ave72 <- AverageExpression(dc72, add.ident = 'clusterID')
+ave72 <- ave72[[1]]
+write.csv(ave72, "analysis/data/ave72.csv")
+ave722 <- as.data.frame(scale(t(ave72)))
+row.names(ave722) <- row.names(as.data.frame(t(ave72)))
+ggheatmap(ave722, orderRow = F, colorPalette = "RdYlBu")
+ave723 <- ave722[-c(6,8,19,20),] # no neutro
+ave723 <- ave722[c(3,4,5,7,12,17),] # pDC
+ave723 <- ave722[-c(4,5,12,17, 6,8,19,20),] # mono
+ave723[is.na(ave723)] <- 0
+scale_fill_distiller(palette ="RdBu", direction = -1)
+ggheatmap(ave723*-1, orderRow = F, colorPalette = "RdYlBu")
+```
+
+```{r}
+degAll <- FindMarkers(dcSubReg, ident.1 = "wt", ident.2 = "ko", min.pct = 0.10, logfc.threshold = 0.10)
+degAll45 <- rownames(degAll[degAll$p_val_adj<1e-45,])
+setdiff(degAll45, setDEG)
+# Not a good strategy, too much cluster shifting
+```
+
+```{r}
+setDEGwt = vector()
+for (i in 1:10) {
+  lessthen10 <- degls[[i]][degls[[i]]$p_val_adj<=1e-13 & degls[[i]]$avg_logFC>0,]
+  print(nrow(lessthen10))
+  setDEGwt <- union(setDEGwt, rownames(lessthen10))
+}
+setDEGwt
+```
+```{r}
+setDEGko = vector()
+for (i in 1:10) {
+  lessthen10 <- degls[[i]][degls[[i]]$p_val_adj<=1e-13 & degls[[i]]$avg_logFC<0,]
+  print(nrow(lessthen10))
+  setDEGko <- union(setDEGko, rownames(lessthen10))
+}
+setDEGko
+```
+```{r}
+setDEGpdc = vector()
+for (i in c(1,2,8)) {
+  lessthen10 <- degls[[i]][degls[[i]]$p_val_adj<=1e-5 & degls[[i]]$avg_logFC<0,]
+  print(nrow(lessthen10))
+  setDEGpdc <- union(setDEGpdc, rownames(lessthen10))
+}
+setDEGpdc
+```

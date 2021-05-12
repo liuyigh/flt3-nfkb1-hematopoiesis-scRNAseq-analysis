@@ -1,0 +1,298 @@
+---
+title: "Re-cluster"
+output: html_notebook
+---
+
+finished at 4.28
+restarted 06.05
+
+```{r}
+library(slingshot)
+library(BUSpaRse)
+library(tidyverse)
+library(tidymodels)
+library(Seurat)
+
+library(scales)
+library(viridis)
+library(Matrix)
+
+library(ggplot2)
+library(patchwork)
+library(dplyr)
+
+library(reshape2)
+```
+
+## Rerun after trying res=0.6(v6.2) __!!skip some sections, see v6.1!!__
+
+```{r}
+DefaultAssay(dcSubReg) <- "RNA"
+dcSubReg <- FindClusters(dcSubReg, resolution = 0.4, verbose = FALSE) #10 clusters
+dcSubReg <- RunUMAP(dcSubReg, dims = 1:20)
+DimPlot(dcSubReg, split.by = "HTO_maxID", label = TRUE, pt.size = 0.1) + NoLegend() 
+```
+
+__!!skip this sections, see v6.1!!__
+```{r}
+clusMarkersRes04 <- FindAllMarkers(dcSubReg, min.pct = 0.25, logfc.threshold = 0.25)
+
+#Save clusMarkers into csv file
+write.csv(clusMarkersRes04, "Sub_Markers_all_7_clusters.csv")
+ttable <- clusMarkersRes04 %>% group_by(cluster) %>% top_n(n = 10, wt = avg_logFC)
+write.csv(ttable, "Sub_Top10_markers_all_7_clusters.csv")
+ttable <- clusMarkersRes04 %>% group_by(cluster) %>% top_n(n = 4, wt = avg_logFC)
+write.csv(ttable, "Sub_Top4_markers_all_7_clusters.csv")
+
+clusMarkersRes04['diffAbs'] <- clusMarkersRes04['pct.1'] - clusMarkersRes04['pct.2']
+clusMarkersRes04['diffMlt'] <- clusMarkersRes04['pct.1'] / clusMarkersRes04['pct.2']
+ttable <- clusMarkersRes04 %>% group_by(cluster) %>% top_n(n = 20, wt = diffAbs)
+ttable2 <- clusMarkersRes04 %>% group_by(cluster) %>% top_n(n = 20, wt = diffMlt)
+
+write.csv(clusMarkersRes04, "Sub_Markers_all_7_clusters_v2.csv")
+write.csv(ttable, "Sub_Top10_markers_all_7_clusters_diffAbs_v2.csv")
+write.csv(ttable2, "Sub_Top4_markers_all_7_clusters_diffMlt_v2.csv")
+```
+
+Clusters: 
+=========
+use ARCHS4 Tissues and Mouse Gene Atlas on ENRichr, look at individual genes
+
+|#  |Prof|    Cell type           |Genes               |Datbase|Confidence Fold change|
+|---|--|--------------------------|--------------------|-------|-----------|
+|0  |++|pDC                       |SiglecH/Ccr9/Bst2/IL7R|     |  high     |
+|1  |- |HSPC1                     |Histone genes       |       |
+|2  |+ |cDC2                       |MHC-II Ciita        |       |  high     |
+|3  |- |Mono                      |Adgre1, Cd14, Ccl9  |       |  high
+|4  |+ |Progenitor(GMP/MDP)                |Proliferation gene|       |
+|5  |- |HSPC2 (Neutro)                    |Cell cycle                |Archs4 |
+|6  |+ |Neureo                    | Mpo, Elain         |       |  high     |
+|7  |  |HSPC3 (T blast)           |T cell              |
+|8  |  |cd8DC                     |                    |       |  high
+|9  |  |Mast cell                 |Cpa3, Cd200r3, MS4a3, cyp11a1| high
+
+
+__!!skip this sections, see v6.1!!__
+```{r}
+ccCountHashSubReg <- table(dcSubReg$Phase, dcSubReg$seurat_clusters, dcSubReg$HTO_maxID)
+write.csv(ccCountHashSubReg,"ccCountHashSubReg.csv" , row.names=FALSE)
+
+## better way
+ccCountHashSubRegPct <- round(prop.table(ccCountHashSubReg, c(3,2))*100, digits =1)
+saveRDS(ccCountHashSubRegPct, "ccCountHashSubRegPct.rds")
+```
+
+__!!skip this sections, see v6.1!!__
+```{r}
+new.cluster.ids <- c("pDC", "HSPC1", "cDC", "monocytes", "HSPC4 (MDP)", "HSPC2 (Neutro)", "Neutrophil", "HSPC3 (T Blast)",  "cd8DC","Mast cell")
+Idents(dcSubReg) <- "seurat_clusters"
+names(new.cluster.ids) <- levels(dcSubReg)
+dcSubReg <- RenameIdents(dcSubReg, new.cluster.ids)
+DimPlot(dcSubReg, label = TRUE) + NoLegend()
+DimPlot(dcSubReg, label = TRUE, split.by = 'HTO_maxID') + NoLegend()
+
+```
+
+## Slingshot
+
+```{r}
+sds <- slingshot(Embeddings(dcSubReg, "umap"), clusterLabels = dcSubReg$seurat_clusters, 
+                 start.clus = 1, stretch = 2, extend = 'n')
+# no diff vs stretch = 0: 
+# sds_s0 <- sds #save stretch = 0 results, avoid repeat calculation
+```
+
+```{r}
+#' Assign a color to each cell based on some value
+#' 
+#' @param cell_vars Vector indicating the value of a variable associated with cells.
+#' @param pal_fun Palette function that returns a vector of hex colors, whose
+#' argument is the length of such a vector.
+#' @param ... Extra arguments for pal_fun.
+#' @return A vector of hex colors with one entry for each cell.
+cell_pal <- function(cell_vars, pal_fun,...) {
+  if (is.numeric(cell_vars)) {
+    pal <- pal_fun(100, ...)
+    return(pal[cut(cell_vars, breaks = 100)])
+  } else {
+    categories <- sort(unique(cell_vars))
+    pal <- setNames(pal_fun(length(categories), ...), categories)
+    return(pal[cell_vars])
+  }
+}
+
+#We need color palettes for both cell types and Leiden clusters. These would be the same colors seen in the Seurat plots.
+
+# cell_colors <- cell_pal(dcSubReg@active.ident, brewer_pal("qual", "Set2"))
+cell_colors_clust <- cell_pal(dcSubReg$seurat_clusters, hue_pal())
+
+# What does the inferred trajectory look like compared to cell types?
+
+# plot(reducedDim(sds), col = cell_colors, pch = 16, cex = 0.5)
+# lines(sds, lwd = 2, type = 'lineages', col = 'black')
+```
+
+```{r}
+plot(reducedDim(sds), col = cell_colors_clust, pch = 16, cex = 0.5)
+lines(sds, lwd = 2, type = 'lineages', col = 'black')
+```
+
+```{r}
+plot(reducedDim(sds), col = cell_colors_clust, pch = 16, cex = 0.5)
+lines(sds, lwd = 2, col = 'black')
+```
+
+Which cells are in which lineage? Here we plot the pseudotime values for each lineage.
+
+
+```{r}
+
+nc <- 2
+pt <- slingPseudotime(sds, na=FALSE) #na=FALSE for other curves, required for condition imbalance
+nms <- colnames(pt)
+nmsT <- c('DC','Mono','Neutro','pDC')
+nr <- ceiling(length(nms)/nc)
+pal <- viridis(100, end = 0.95)
+par(mfrow = c(nr, nc))
+for (i in seq(4)) {
+  colors <- pal[cut(pt[,nms[i]], breaks = 100)]
+  plot(reducedDim(sds), col = colors, pch = 16, cex = 0.5, main = nmsT[i])
+  lines(sds, lwd = 2, col = 'black', type = 'lineages')
+}
+```
+
+## Condition analysis
+
+```{r}
+curveWeight <- slingCurveWeights(sds)
+curveWeight <- as.data.frame(curveWeight)
+maxID <- as.data.frame(dcSubReg$HTO_maxID)
+linWeigh <- merge(curveWeight, maxID, by="row.names",all.x=TRUE)
+curveTime <- slingPseudotime(sds)
+curveTime <- as.data.frame(curveTime)
+linTime <- merge(curveTime, maxID, by="row.names",all.x=TRUE)
+names(linTime)[2:6] <- c('DC','Mono','Neutro','pDC','maxID')
+map = setNames(c("WT3", "KO3", "WT5","KO5"), c("Hash1", "Hash2", "Hash3", "Hash5"))
+linTime['maxID'] <- map[unlist(linTime['maxID'])]
+linTime['Day'] <- substr(linTime[,'maxID'], 3,3)
+linTime['Geno'] <- substr(linTime[,'maxID'], 1,2)
+linTimeMelt <- melt(linTime, measure.vars=2:5)
+colnames(linTimeMelt)[6] <- "Pseudotime"
+linTimeMelt$type_f = factor(linTimeMelt$variable, levels=c('DC','pDC','Mono','Neutro'))
+```
+
+```{r}
+ggplot(linTimeMelt, aes(Pseudotime, Geno, fill=Geno)) + 
+    #geom_violin() +
+    geom_boxplot(width=0.5) +
+    facet_grid(type_f~Day) +
+    theme_light()
+```
+
+```{r}
+ggplot(linTimeMelt, aes(Pseudotime, Geno, fill=Geno)) + 
+    geom_violin(fill=NA) +
+    geom_boxplot(width=0.2) +
+    facet_grid(type_f~Day) +
+    theme_light()
+
+# 07-11-2020
+ggplot(subset(linTimeMelt, Day %in% c(3)), aes(Pseudotime, Geno, fill=Geno)) +
+  geom_violin(fill=NA) +
+  geom_boxplot(width=0.2) +
+  facet_grid(type_f~Day) +
+  theme_light()
+
+ggplot(subset(linTimeMelt, Day %in% c(5)), aes(Pseudotime, Geno, fill=Geno)) +
+  geom_violin(fill=NA) +
+  geom_boxplot(width=0.2) +
+  facet_grid(type_f~Day) +
+  theme_light()
+
+
+```
+
+
+
+## Differential expression
+
+```{r}
+load('/mnt/biggie/expansion/Yi/RData/20200428-v6.3.RData')
+top_hvg <- readRDS("~/scRNAseq/analysis/data/top_hvg_500.rds")
+```
+Let’s look at which genes are differentially expressed along one of those lineages (linage 2). In dynverse, feature (gene) importance is calculated by using gene expression to predict pseudotime value with random forest and finding genes that contribute the most to the accuracy of the response. Since it’s really not straightforward to convert existing pseudotime results to dynverse format, it would be easier to build a random forest model. Variable importance will be calculated for the top 300 highly variable genes here, with tidymodels. This is to make the code run faster. There are other methods of trajectory DE as well, which may be more appropriate but more time consuming to run, such as tradeSeq and SpatialDE (when run with one dimension).
+
+```{r}
+# Get top highly variable genes # run with sc V1.1
+top_hvg <- HVFInfo(dcSubReg) %>% 
+  mutate(., bc = rownames(.)) %>% 
+  arrange(desc(residual_variance)) %>% 
+  top_n(300, residual_variance) %>% 
+  pull(bc)
+# Prepare data for random forest
+dat_use <- t(GetAssayData(dcSubReg, slot = "data")[top_hvg,])
+dat_use_df <- cbind(slingPseudotime(sds)[,2], dat_use) # Do curve 2, so 2nd columnn
+colnames(dat_use_df)[1] <- "pseudotime"
+dat_use_df <- as.data.frame(dat_use_df[!is.na(dat_use_df[,1]),])
+names(dat_use_df)<-make.names(names(dat_use_df),unique = TRUE)
+```
+
+The subset of data is randomly split into training and validation; the model fitted on the training set will be evaluated on the validation set.
+
+```{r}
+dat_split <- initial_split(dat_use_df)
+dat_train <- training(dat_split)
+dat_val <- testing(dat_split)
+```
+tidymodels is a unified interface to different machine learning models, a “tidier” version of caret. The code chunk below can easily be adjusted to use other random forest packages as the back end, so no need to learn new syntax for those packages.
+```{r}
+model <- rand_forest(mtry = 200, trees = 1400, min_n = 15, mode = "regression") %>%
+  set_engine("ranger", importance = "impurity", num.threads = 16) %>%
+  fit(pseudotime ~ ., data = dat_train) #12:56 -> 58
+```
+The model is evaluated on the validation set with 3 metrics: room mean squared error (RMSE), coefficient of determination using correlation (rsq, between 0 and 1), and mean absolute error (MAE).
+```{r}
+val_results <- dat_val %>% 
+  mutate(estimate = predict(model, .[,-1]) %>% pull()) %>% 
+  select(truth = pseudotime, estimate)
+metrics(data = val_results, truth, estimate)
+
+#> # A tibble: 3 x 3
+#>   .metric .estimator .estimate
+#>   <chr>   <chr>          <dbl>
+#> 1 rmse    standard       1.47 
+#> 2 rsq     standard       0.962
+#> 3 mae     standard       0.739
+```
+RMSE and MAE should have the same unit as the data. As pseudotime values here usually have values much larger than 2, the error isn’t too bad. Correlation (rsq) between slingshot’s pseudotime and random forest’s prediction is very high, also showing good prediction from the top 300 highly variable genes.
+```{r}
+summary(dat_use_df$pseudotime)
+
+#>    Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+#>   0.000   4.172  13.385  11.914  18.177  24.116
+```
+Now it’s time to plot some genes deemed the most important to predicting pseudotime:
+```{r}
+gns <- tr2g_ensembl(species = "Mus musculus", use_gene_name = TRUE, 
+                    ensembl_version = 97)[,c("gene", "gene_name")] %>% 
+  distinct()
+var_imp <- sort(model$fit$variable.importance, decreasing = TRUE)
+top_genes <- names(var_imp)[1:9]
+# Convert to gene symbol
+top_gene_name <- top_genes #gns$gene_name[match(top_genes, gns$gene)]
+
+par(mfrow = c(3, 3))
+for (i in seq_along(top_genes)) {
+  colors <- pal[cut(dat_use[,top_genes[i]], breaks = 100)]
+  plot(reducedDim(sds), col = colors, 
+       pch = 16, cex = 0.5, main = top_gene_name[i])
+  lines(sds, lwd = 2, col = 'black', type = 'lineages')
+}
+```
+
+
+
+## Find cluster markers using DEG between clusters
+
+## Redo DEG between genotypes
+

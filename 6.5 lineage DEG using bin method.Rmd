@@ -1,0 +1,123 @@
+---
+title: "dc v6.5 pDC DEGs"
+output: html_notebook
+---
+```{r}
+library(Seurat)
+library(slingshot)
+```
+```{r}
+degls <- readRDS('~/scRNAseq/analysis/data/degls-2020-06-07.rds')
+setDEGpdc = vector()
+for (i in c(1,2,8)) {
+  lessthen10 <- degls[[i]][degls[[i]]$p_val_adj<=1e-8 & degls[[i]]$avg_logFC<0,]
+  print(nrow(lessthen10))
+  setDEGpdc <- union(setDEGpdc, rownames(lessthen10))
+}
+setDEGpdc
+dcpdc5 <- dcSubReg[['RNA']]@scale.data[setDEGpdc,]
+dcpdc5 <- CreateSeuratObject(dcpdc5)
+genotype <- dcSubReg@meta.data[, 'genotype']
+dcpdc5 <- AddMetaData(object = dcpdc5, metadata = genotype, col.name = 'genotype')
+pDCtime <- linTime[['pDC']]
+dcpdc5 <- AddMetaData(object = dcpdc5, metadata = pDCtime, col.name = 'pDCtime')
+dcpdc5lin <- subset(dcpdc5, cells = names(which(!is.na(dcpdc5$pDCtime))))
+dcpdc5lin <- AddMetaData(object = dcpdc5lin, metadata = cut(dcpdc5lin$pDCtime, 10, labels = FALSE), col.name = 'pDCtimebin')
+
+## not doing cluster, bin lintime instead
+#dc255wt <- subset(dc255, idents = 'wt')
+#dc255ko <- subset(dc255, idents = 'ko')
+#cluster <- dcSubReg@meta.data[, 'seurat_clusters']
+#cluster
+#dcpdc5 <- AddMetaData(object = dcpdc5, metadata = cluster, col.name = 'cluster')
+Idents(dcpdc5lin) <- 'genotype'
+avepdc5lin <- AverageExpression(dcpdc5lin, add.ident = 'pDCtimebin')
+dcpdc5linwt <- subset(dcpdc5lin, idents = 'wt')
+dcpdc5linko <- subset(dcpdc5lin, idents = 'ko')
+Idents(dcpdc5linwt) <- 'pDCtimebin'
+Idents(dcpdc5linko) <- 'pDCtimebin'
+avepdc5linwt <- AverageExpression(dcpdc5linwt)[[1]]
+avepdc5linko <- AverageExpression(dcpdc5linko)[[1]]
+write.csv(avepdc5linwt, "~/scRNAseq/analysis/data/avepdc5linwt.csv")
+write.csv(avepdc5lin, "~/scRNAseq/analysis/data/avepdc5lin.csv")
+write.csv(avepdc5linko, "~/scRNAseq/analysis/data/avepdc5linko.csv")
+```
+
+```{r}
+degls <- readRDS('~/scRNAseq/analysis/data/degls-2020-06-07.rds')
+setDEGpdclo = vector()
+for (i in c(1,2,8)) {
+  lessthen10 <- degls[[i]][degls[[i]]$p_val_adj<=1e-8 & degls[[i]]$avg_logFC>0,]
+  print(nrow(lessthen10))
+  setDEGpdclo <- union(setDEGpdclo, rownames(lessthen10))
+}
+setDEGpdclo
+dcpdc5lo <- dcSubReg[['RNA']]@scale.data[setDEGpdclo,]
+dcpdc5lo <- CreateSeuratObject(dcpdc5lo)
+genotype <- dcSubReg@meta.data[, 'genotype']
+dcpdc5lo <- AddMetaData(object = dcpdc5lo, metadata = genotype, col.name = 'genotype')
+pDCtime <- linTime[['pDC']]
+dcpdc5lo <- AddMetaData(object = dcpdc5lo, metadata = pDCtime, col.name = 'pDCtime')
+dcpdc5linlo <- subset(dcpdc5lo, cells = names(which(!is.na(dcpdc5lo$pDCtime))))
+dcpdc5linlo <- AddMetaData(object = dcpdc5linlo, metadata = cut(dcpdc5linlo$pDCtime, 10, labels = FALSE), col.name = 'pDCtimebin')
+
+Idents(dcpdc5linlo) <- 'genotype'
+avepdc5linlo <- AverageExpression(dcpdc5linlo, add.ident = 'pDCtimebin')
+write.csv(avepdc5linlo, "~/scRNAseq/analysis/data/avepdc5linlo.csv")
+# dcpdc5linlowt <- subset(dcpdc5linlo, idents = 'wt')
+# dcpdc5linloko <- subset(dcpdc5linlo, idents = 'ko')
+# Idents(dcpdc5linlowt) <- 'pDCtimebin'
+# Idents(dcpdc5linloko) <- 'pDCtimebin'
+# avepdc5linlowt <- AverageExpression(dcpdc5linlowt)[[1]]
+# avepdc5linloko <- AverageExpression(dcpdc5linloko)[[1]]
+# write.csv(avepdc5linlowt, "~/scRNAseq/analysis/data/avepdc5linlowt.csv")
+# write.csv(avepdc5linloko, "~/scRNAseq/analysis/data/avepdc5linloko.csv")
+```
+
+```{r}
+degls <- readRDS('~/scRNAseq/analysis/data/degls-2020-06-07.rds')
+setDEGcdc = vector()
+for (i in c(2,3,5,6,9)) {
+  lessthen10 <- degls[[i]][degls[[i]]$p_val_adj<=1e-8 & degls[[i]]$avg_logFC<0,]
+  print(nrow(lessthen10))
+  setDEGcdc <- union(setDEGcdc, rownames(lessthen10))
+}
+setDEGcdc
+dccdc5 <- dcSubReg[['RNA']]@scale.data[setDEGcdc,]
+dccdc5 <- CreateSeuratObject(dccdc5)
+genotype <- dcSubReg@meta.data[, 'genotype']
+dccdc5 <- AddMetaData(object = dccdc5, metadata = genotype, col.name = 'genotype')
+cDCtime <- linTime[['DC']]
+dccdc5 <- AddMetaData(object = dccdc5, metadata = cDCtime, col.name = 'cDCtime')
+dccdc5lin <- subset(dccdc5, cells = names(which(!is.na(dccdc5$cDCtime))))
+dccdc5lin <- AddMetaData(object = dccdc5lin, metadata = cut(dccdc5lin$cDCtime, 10, labels = FALSE), col.name = 'cDCtimebin')
+
+Idents(dccdc5lin) <- 'genotype'
+avecdc5lin <- AverageExpression(dccdc5lin, add.ident = 'cDCtimebin')
+write.csv(avecdc5lin, "~/scRNAseq/analysis/data/avecdc5lin.csv")
+```
+
+
+```{r}
+degls <- readRDS('~/scRNAseq/analysis/data/degls-2020-06-07.rds')
+setDEGcdclo = vector()
+for (i in c(2,3,5,6,9)) {
+  lessthen10 <- degls[[i]][degls[[i]]$p_val_adj<=1e-8 & degls[[i]]$avg_logFC>0,]
+  print(nrow(lessthen10))
+  setDEGcdclo <- union(setDEGcdclo, rownames(lessthen10))
+}
+setDEGcdclo
+dccdc5lo <- dcSubReg[['RNA']]@scale.data[setDEGcdclo,]
+dccdc5lo <- CreateSeuratObject(dccdc5lo)
+genotype <- dcSubReg@meta.data[, 'genotype']
+dccdc5lo <- AddMetaData(object = dccdc5lo, metadata = genotype, col.name = 'genotype')
+cdctime <- linTime[['DC']]
+dccdc5lo <- AddMetaData(object = dccdc5lo, metadata = cDCtime, col.name = 'cDCtime')
+dccdc5linlo <- subset(dccdc5lo, cells = names(which(!is.na(dccdc5lo$cDCtime))))
+dccdc5linlo <- AddMetaData(object = dccdc5linlo, metadata = cut(dccdc5linlo$cDCtime, 10, labels = FALSE), col.name = 'cDCtimebin')
+
+Idents(dccdc5linlo) <- 'genotype'
+avecdc5linlo <- AverageExpression(dccdc5linlo, add.ident = 'cDCtimebin')
+write.csv(avecdc5linlo, "~/scRNAseq/analysis/data/avecdc5linlo.csv")
+
+```

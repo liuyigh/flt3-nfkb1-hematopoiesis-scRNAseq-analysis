@@ -1,0 +1,19 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+Making Figures
+
+```{r}
+library(data.table)
+library(gridExtra)
+library(ggplot2)
+library(ggheatmap)
+plots <- list() 
+for (i in seq(4)) {
+  plots[[i]] <- ggheatmap(as.data.frame.matrix(round(prop.table(ccCountHashSubReg[,,i], 2)*100, 1)), orderCol = F, colorPalette = "PuRd")
+}
+do.call(grid.arrange, c(plots, ncol = 2))
+```
+

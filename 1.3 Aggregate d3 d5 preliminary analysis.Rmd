@@ -1,0 +1,110 @@
+---
+title: "Aggr"
+output: html_notebook
+---
+
+## merge day3 day5 data into one
+
+```{r}
+dc <- merge(d3, y = d5, add.cell.ids = c("d3", "d5"), project = "DC")
+```
+
+## redo analysis
+
+```{r}
+dc <- NormalizeData(dc)
+# Select the top 1000 most variable features
+dc <- FindVariableFeatures(dc, selection.method = "mean.var.plot")
+
+# Scaling RNA data, we only scale the variable features here for efficiency
+dc <- ScaleData(dc, features = VariableFeatures(dc))
+
+# Run PCA
+dc <- RunPCA(dc, features = VariableFeatures(dc))
+
+# View PCA
+VizDimLoadings(dc, dims = 1:4, reduction = "pca")
+
+## In particular DimHeatmap allows for easy exploration of the primary sources of heterogeneity in a dataset, and can be useful when trying to decide which PCs to include for further downstream analyses. Both cells and features are ordered according to their PCA scores. Setting cells to a number plots the ‘extreme’ cells on both ends of the spectrum, which dramatically speeds plotting for large datasets. Though clearly a supervised analysis, we find this to be a valuable tool for exploring correlated feature sets.
+
+DimHeatmap(dc, dims = 1:15, cells = 500, balanced = TRUE)
+```
+
+PC_ 1 
+Positive:  Ighm, Ptprcap, Dnajc7, Pafah1b3, Ly6d, Atp1b1, Cd79b, Chchd10, Cnp, Pkig 
+	   Sox4, Foxp1, Vpreb3, Ebf1, Cd79a, Rhoh, Ptp4a3, Bach2, Spib, Blnk 
+	   Fcrla, Mzb1, Rpsa, Irf8, Tcf4, Smarca4, Bcl7a, Xrcc6, Jund, N4bp2 
+Negative:  Anxa1, Wfdc21, Pglyrp1, Lcn2, Ngp, Pygl, Lyz2, S100a8, Camp, C3 
+	   Cd177, Ltf, S100a9, Syne1, Mcemp1, Chil3, Chil1, Hp, Ifitm6, Rflnb 
+	   Trem3, Ltb4r1, Ckap4, Gda, Lrg1, Prdx5, Cebpe, Itgb2l, Itgam, Igsf6 
+PC_ 2 
+Positive:  Vpreb3, Ebf1, Cd79a, Chchd10, Cd79b, Cd24a, Ighm, Mzb1, Cecr2, Akap12 
+	   Mgst1, Pax5, Pou2af1, S100a9, Rag1, Fcrla, Lars2, S100a8, Bach2, Rhoh 
+	   N4bp2, C1galt1, Atp1b1, Bcl7a, Igkc, Fam53b, Ets1, Ngp, Camp, Lcn2 
+Negative:  Rpsa, Cst3, Rplp0, Ctss, S100a4, Ms4a4c, Ifitm1, Ifitm2, Tmem176b, Ms4a6b 
+	   Ly6a, Tmem176a, Ckb, Ifitm3, Wfdc17, H2-DMb1, Ctsc, Cd74, H2-Aa, H2-Ab1 
+	   Ahnak, H2-Eb1, Fth1, Pid1, S100a10, H2afz, Actg1, Tnip3, Ciita, Bst2 
+PC_ 3 
+Positive:  Btg1, Cd74, H2-Eb1, H2-Aa, Ctss, Marcks, H2-Ab1, Btg2, Ifi27l2a, Slfn5 
+	   Cd300c2, Pirb, Clec4a3, Clec4a1, Cytip, Pid1, Gngt2, Zfp36l1, S100a6, Lgals3 
+	   Rgs2, Arl5c, Ciita, Slamf7, Wfdc17, Epsti1, Junb, Cxcl16, Traf1, Ypel3 
+Negative:  Mki67, Prtn3, Hsp90ab1, H2afx, Hist1h1b, Hist1h2ap, Ctsg, Hist1h2ae, Fabp5, H2afz 
+	   Ctr9, Myl10, Serpinb1a, Cenpf, Rplp0, Ube2c, Kcnq1ot1, Slpi, Gm26917, Rpsa 
+	   Mpo, Nkg7, Ms4a3, Gem, Myb, Hist1h1e, Cd93, Sod2, Alas1, Adgrg1 
+PC_ 4 
+Positive:  Siglech, Ctsl, Ccr9, Pacsin1, Runx2, Cox6a2, Pltp, Upb1, Tcf4, Cd7 
+	   Lair1, Nucb2, P2ry14, Sell, Fyn, Cd300c, Lefty1, Bst2, Bcl11a, Smim5 
+	   AC140186.1, Jaml, Lag3, Mpeg1, Rnase6, Prkca, Tsc22d1, Rpgrip1, Gm5547, Mctp2 
+Negative:  Ifitm2, Ifitm3, Prtn3, Ccl9, Ifitm1, Chchd10, Ebf1, Cd79b, Vpreb3, Ms4a6b 
+	   Cd79a, Csf1r, Arl5c, H2afz, Cebpb, Emilin2, Tgfbi, Ctsg, Tnip3, Ms4a6d 
+	   Ms4a4c, Jun, Cd93, Cecr2, Rag1, Pou2af1, Akap12, Pax5, Ctsc, N4bp2 
+PC_ 5 
+Positive:  Ctsc, Tgfbi, Ms4a6b, Ifi27l2a, Ifi204, Fth1, Ms4a4c, Csf1r, Ms4a6d, Ly6a 
+	   Emilin2, Cebpb, Grn, Ahnak, S100a10, Gpr141, Pid1, Cybb, Lrp1, Fyb 
+	   Clec4a3, Ccl6, Lyz2, Cx3cr1, Wfdc17, Ccl9, Mpeg1, Lgals3, Cd300c2, Ifitm3 
+Negative:  Fscn1, Socs2, Cacnb3, Ccr7, Ccl5, Serpinb6b, Serpinb9, Cd83, Il4i1, Ramp3 
+	   Traf1, Apol7c, Ccl22, Relb, Tbc1d4, Rgs1, Cxcl16, Etv3, Tmcc3, Bcl2a1b 
+	   Gadd45b, Bcl2a1d, Tmem123, Stat4, Grasp, Eno3, Cd63, Map3k14, Tspan3, Pcgf5
+
+```{r}
+ElbowPlot(dc, ndims = 40)
+dc <- FindNeighbors(dc, reduction = "pca", dims = 1:29)
+dc <- FindClusters(dc, resolution = 2, verbose = FALSE)
+dc <- RunTSNE(dc, reduction = "pca", dims = 1:20)
+
+# Projecting singlet identities on TSNE visualization
+DimPlot(dc, group.by = "HTO_maxID")
+```
+
+## cell cycle scoring
+
+__!NOTE__: variable `cc.genes` is loaded with `Seurat` library. They are all capital human genes. Convert to title capital first. Later we discovered 3 genes name are different between human and mouse. It was fixed in dc_v4.1.
+
+```{r}
+firstup <- function(x) {
+  x <- tolower(x)
+  substr(x, 1, 1) <- toupper(substr(x, 1, 1))
+  x
+}
+
+s.genes <- firstup(cc.genes$s.genes)
+g2m.genes <- firstup(cc.genes$g2m.genes)
+dc <- CellCycleScoring(dc, s.features = s.genes, g2m.features = g2m.genes, set.ident = TRUE)
+
+RidgePlot(dc, features = c("Pcna", "Top2a", "Mcm6", "Mki67"), ncol = 2)
+
+FeaturePlot(dc, features = "Flt3", split.by = "HTO_maxID", ncol = 2)
+```
+```{r}
+## Look at Phase distribution split by samples
+DimPlot(dc, split.by = "HTO_maxID", group.by = "Phase")
+```
+```{r}
+DimPlot(dc, split.by = "HTO_maxID", group.by = "Phase")
+```
+
+```{r}
+## look at Signlech, a pDC marker
+FeaturePlot(dc, features = "Siglech", split.by = "HTO_maxID", ncol = 2)
+```
+

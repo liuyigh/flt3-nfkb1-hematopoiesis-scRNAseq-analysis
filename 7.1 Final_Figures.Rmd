@@ -1,0 +1,227 @@
+---
+title: "Final Figures"
+output: html_notebook
+---
+
+```{r}
+library(Seurat)
+library(ggplot2)
+library(gridExtra)
+library(ggrepel)
+library(egg)
+Idents(dcSubReg) <- "Phase"
+DimPlot(dcSubReg, split.by = 'HTO_maxID')
+
+plot(reducedDim(sds), col = cell_colors_clust, pch = 16, cex = 0.2)
+lines(sds, lwd = 2, type = 'lineages', col = 'black', cex = 1.2)
+
+plot(reducedDim(sds), col = cell_colors_clust, pch = 16, cex = 0.2)
+lines(sds, lwd = 2, col = 'black')
+
+ggplot(SRclu1Mkr, aes(x=avg_logFC, y=-log10(p_val_adj), label=row.names(SRclu1Mkr))) + geom_point(size = 1) +
+      geom_label_repel(data=  SRclu1Mkr[log10(SRclu1Mkr$p_val_adj) < -30,], aes(label = row.names(SRclu1Mkr[log10(SRclu1Mkr$p_val_adj) < -30,])),
+                      box.padding = unit(0.5, 'lines'),
+                  segment.color = 'deepskyblue'
+                  )
+```
+
+```{r}
+ggplot(SRclu1Mkr, aes(x=pctFold*ifelse(avg_logFC >0, 1, -1), y=-log10(p_val_adj), label=row.names(SRclu1Mkr))) + geom_point(size = 1) +
+      geom_label_repel(data=  SRclu1Mkr[log10(SRclu1Mkr$p_val_adj) < -30,], aes(label = row.names(SRclu1Mkr[log10(SRclu1Mkr$p_val_adj) < -30,])),
+                      box.padding = unit(0.5, 'lines'),
+                  segment.color = 'deepskyblue'
+                  )
+```
+
+```{r}
+dcSubReg$sampleID <- factor(dcSubReg$HTO_maxID,levels = c("Hash1", "Hash2", "Hash3", "Hash5"))
+Idents(dcSubReg) <- "sampleID"
+VlnPlot(dcSubReg, features = 'Mid1', pt.size = 0.1)+NoLegend()
+VlnPlot(dcSubReg, features = 'Il12a', pt.size = 0.1)+NoLegend()
+VlnPlot(dcSubReg, features = 'Slamf1', pt.size = 0.1)+NoLegend()
+```
+
+```{r}
+# for Loupe
+#umap = cbind("Barcode" = rownames(Embeddings(object = dcSubReg, reduction = "umap")), Embeddings(object = dcSubReg, reduction = "umap"))
+umap <- Embeddings(object = dcSubReg, reduction = "umap")
+Idents(dcSubReg) <- 'genotype'
+
+umap <- vector()
+umap1 <- Embeddings(object = subset(dcSubReg, idents = 'wt'), reduction = "umap")
+umap2 <- Embeddings(object = subset(dcSubReg, idents = 'ko'), reduction = "umap")
+Idents(dcSubReg) <- 'HTO_maxID'
+umap3 <- Embeddings(object = subset(dcSubReg, idents = 'Hash1'), reduction = "umap")
+umap4 <- Embeddings(object = subset(dcSubReg, idents = 'Hash2'), reduction = "umap")
+umap5 <- Embeddings(object = subset(dcSubReg, idents = 'Hash3'), reduction = "umap")
+umap6 <- Embeddings(object = subset(dcSubReg, idents = 'Hash5'), reduction = "umap")
+
+library(wesanderson)
+pal <- wes_palette("Zissou1", 100, type = "continuous")
+#ayout(matrix(c(1,1,2,3), 2, 2, byrow = TRUE))
+p1 <- ggplot(as.data.frame(umap3), aes(x=UMAP_1, y=UMAP_2) ) +
+  geom_hex(bins = 36) +
+  scale_fill_gradientn(colors = pal,trans="log10", limits=c(-1,12), na.value="red3") +
+  lims( x = c(-9, 11), y= c(-8,8)) +
+  #scale_fill_continuous(type = 'viridis', trans="log10", limits=c(-1,16), na.value="red") + # 
+  theme_bw() + NoLegend()
+p2 <- ggplot(as.data.frame(umap4), aes(x=UMAP_1, y=UMAP_2) ) +
+  geom_hex(bins = 36) +
+  scale_fill_gradientn(colors = pal,trans="log10", limits=c(-1,12), na.value="red3") +
+  lims( x = c(-9, 11), y= c(-8,8)) +
+  #scale_fill_continuous(type = 'viridis', trans="log10", limits=c(-1,16), na.value="red") + # 
+  theme_bw()+ NoLegend()
+p3 <- ggplot(as.data.frame(umap5), aes(x=UMAP_1, y=UMAP_2) ) +
+  geom_hex(bins = 36) +
+  scale_fill_gradientn(colors = pal,trans="log10", limits=c(-1,16), na.value="red3") +
+  lims( x = c(-9, 11), y= c(-8,8)) +
+  #scale_fill_continuous(type = 'viridis', trans="log10", limits=c(-1,16), na.value="red") + # 
+  theme_bw()+ NoLegend()
+p4 <- ggplot(as.data.frame(umap6), aes(x=UMAP_1, y=UMAP_2) ) +
+  geom_hex(bins = 36) +
+  scale_fill_gradientn(colors = pal,trans="log10", limits=c(-1,16), na.value="red3") +
+  lims( x = c(-9, 11), y= c(-8,8)) +
+  #scale_fill_continuous(type = 'viridis', trans="log10", limits=c(-1,16), na.value="red") + # 
+  theme_bw()+ NoLegend()
+
+grid.arrange(p1, p2, p3, p4, nrow = 1)
+
+write.table(umap, file="~/scRNAseq/analysis/data/umap_rna.csv", sep = ",", quote = F, row.names = F, col.names = T)
+```
+
+```{r}
+new.cluster.ids <- c("pDC", "HSPC1", "cDC2", "monocytes", "HSPC4 (MDP)", "HSPC2 (Neutro)", "Neutrophil", "HSPC3 (Lymph)",  "cDC1","Mast cell")
+new.cluster.ids <- c("pDC", "HSPC1", "cDC2", "monocyte", "HSPC2", "HSPC4", "Neutrophil", "HSPC3",  "cDC1","Mast")
+Idents(dcSubReg) <- "seurat_clusters"
+names(new.cluster.ids) <- levels(dcSubReg)
+dcSubReg <- RenameIdents(dcSubReg, new.cluster.ids)
+DimPlot(dcSubReg, label = TRUE) + NoLegend()
+DimPlot(dcSubReg, label = TRUE, split.by = 'HTO_maxID') + NoLegend()
+```
+
+```{r}
+dcSubReg$PhaseSorted <- factor(dcSubReg$Phase,levels = c("G1", "S","G2M"))
+Idents(dcSubReg) <- "PhaseSorted"
+DimPlot(dcSubReg, label = FALSE, split.by = 'HTO_maxID', cols = c("#619CFF", "#00BA38","#F8766D")) # 11 x 3
+```
+
+## 2020.12.23 finalize
+```{r}
+p1 <- ggplot(as.data.frame(umap3), aes(x=UMAP_1, y=UMAP_2) ) +
+  geom_hex(bins = 36) +
+  scale_fill_gradientn(colors = pal,trans="log10", limits=c(-1,12), na.value="red3") +
+  theme_classic() + NoLegend()  +
+ theme(axis.text.y = element_blank(), 
+        aspect.ratio = 0.78,
+        axis.ticks.y = element_blank(), 
+        axis.title.y = element_blank(),
+        axis.title.x = element_blank(),
+        plot.margin = unit(c(0,-0,0,0), "cm"),
+        )
+p2 <- ggplot(as.data.frame(umap4), aes(x=UMAP_1, y=UMAP_2) ) +
+  geom_hex(bins = 36) +
+  scale_fill_gradientn(colors = pal,trans="log10", limits=c(-1,12), na.value="red3") +
+  theme_classic()+ NoLegend()+
+  theme(axis.text.y = element_blank(), 
+        axis.line.y=element_blank(), 
+        axis.ticks.y = element_blank(), 
+        axis.title.y = element_blank(),
+        axis.title.x = element_blank(),
+        plot.margin = unit(c(0,-0,0,0), "cm"),
+       aspect.ratio = 0.78)
+p3 <- ggplot(as.data.frame(umap5), aes(x=UMAP_1, y=UMAP_2) ) +
+  geom_hex(bins = 36) +
+  scale_fill_gradientn(colors = pal,trans="log10", limits=c(-1,16), na.value="red3") +
+  theme_classic()+ NoLegend()+
+  theme(axis.text.y = element_blank(), 
+        axis.line.y=element_blank(), 
+        axis.ticks.y = element_blank(), 
+        axis.title.y = element_blank(),
+        axis.title.x = element_blank(),
+        plot.margin = unit(c(0,-0,0,0), "cm"),
+       aspect.ratio = 0.78)
+p4 <- ggplot(as.data.frame(umap6), aes(x=UMAP_1, y=UMAP_2) ) +
+  geom_hex(bins = 36) +
+  scale_fill_gradientn(colors = pal,trans="log10", limits=c(-1,16), na.value="red3") +
+  theme_classic()+ NoLegend()+
+  theme(axis.text.y = element_blank(), 
+        axis.line.y=element_blank(),
+        axis.ticks.y = element_blank(), 
+        axis.title.y = element_blank(),
+        axis.title.x = element_blank(),
+        plot.margin = unit(c(0,-0,0,0), "cm"),
+       aspect.ratio = 0.78)
+
+grid.arrange(p1, p2, p3, p4, nrow = 1)
+```
+
+```{r}
+pseudotimePanel3 <- ggplot(subset(linTimeMelt, Day %in% c(3)), aes(Pseudotime, Geno, fill=Geno)) +
+  geom_violin(fill=NA) +
+  geom_boxplot(width=0.2) +
+  facet_grid(type_f~Day) +
+  theme_classic() + theme(panel.spacing = unit(0.04, "cm"))
+
+set_panel_size(pseudotimePanel3, f="~/scRNAseq/analysis/Plots/pseudotimePanel3.pdf", width = unit(4, "cm"), height = unit(0.97,"cm"))
+
+pseudotimePanel5 <- ggplot(subset(linTimeMelt, Day %in% c(5)), aes(Pseudotime, Geno, fill=Geno)) +
+  geom_violin(fill=NA) +
+  geom_boxplot(width=0.2) +
+  facet_grid(type_f~Day) +
+  theme_classic() + theme(panel.spacing = unit(0.04, "cm"))
+
+set_panel_size(pseudotimePanel5, f="~/scRNAseq/analysis/Plots/pseudotimePanel5.pdf", width = unit(4, "cm"), height = unit(0.97,"cm"))
+
+pseudotimePanel3 <- ggplot(subset(linTimeMelt, Day %in% c(3) & type_f %in% c('DC','pDC')), aes(Pseudotime, Geno, fill=Geno)) +
+  geom_violin(fill=NA) +
+  geom_boxplot(width=0.2) +
+  facet_grid(type_f~Day) +
+  theme_classic() + theme(panel.spacing = unit(0.04, "cm"))
+
+set_panel_size(pseudotimePanel3, f="~/scRNAseq/analysis/Plots/pseudotimePanel3-2lin.pdf", width = unit(4, "cm"), height = unit(1.98,"cm"))
+
+pseudotimePanel5 <- ggplot(subset(linTimeMelt, Day %in% c(5) & type_f %in% c('DC','pDC')), aes(Pseudotime, Geno, fill=Geno)) +
+  geom_violin(fill=NA) +
+  geom_boxplot(width=0.2) +
+  facet_grid(type_f~Day) +
+  theme_classic() + theme(panel.spacing = unit(0.04, "cm"))
+
+set_panel_size(pseudotimePanel5, f="~/scRNAseq/analysis/Plots/pseudotimePanel5.pdf", width = unit(4, "cm"), height = unit(1.98,"cm"))
+
+degVolcano <- ggplot(SRclu1Mkr, aes(x=avg_logFC, y=-log10(p_val_adj), label=row.names(SRclu1Mkr))) + geom_point(size = 1) +
+      geom_label_repel(data=  SRclu1Mkr[log10(SRclu1Mkr$p_val_adj) < -30,], aes(label = row.names(SRclu1Mkr[log10(SRclu1Mkr$p_val_adj) < -30,])),
+                      box.padding = unit(0.2, 'lines'),
+                      label.padding = unit(0.1, 'lines'),
+                  segment.color = 'deepskyblue',
+                  size = 2.5,
+                  )+
+            theme_classic() +
+  geom_hline(aes(yintercept=30),linetype = "dashed")
+
+set_panel_size(degVolcano, f="~/scRNAseq/analysis/Plots/degVolcano.pdf", width = unit(4, "cm"), height = unit(3,"cm"))
+
+
+```
+
+```{r}
+degs1 <- plotSmoothers(sce, assays(sce)$counts, gene = "Degs1", alpha = 0, border = TRUE) + ggtitle("Degs1") + ylim(0.2, 1.0) + theme_classic() + NoLegend()
+
+set_panel_size(degs1, f="~/scRNAseq/analysis/Plots/degs1.pdf", width = unit(4, "cm"), height = unit(3,"cm"))
+
+plotSmoothers(sce, assays(sce)$counts, gene = "Degs1", alpha = 0, border = TRUE) + ggtitle("Degs1") + ylim(0.2, 1.0) + theme_classic() + NoLegend()
+
+plotSmoothers(sce, assays(sce)$counts, gene = "H2.K1", alpha = 0, border = TRUE) + ggtitle("H2-K1") + ylim(0.2, 1.0) + theme_classic() + NoLegend()
+```
+
+```{r}
+imbalancePlot <- ggplot(mdata,aes(x=t1,y=fit1))+geom_line(aes(x=t1,y=fit1))+
+  geom_ribbon(aes(ymin = min1, ymax = max1), fill="#3399FF", alpha=0.5)+
+  geom_line(aes(x=t2,y=fit2))+
+  geom_ribbon(aes(ymin = min2, ymax = max2), fill="#CC6666", alpha=0.5)+
+  theme_classic()
+
+
+set_panel_size(imbalancePlot, f="~/scRNAseq/analysis/Plots/imbalancePlot_classic.pdf", width = unit(4, "cm"), height = unit(3,"cm"))
+
+```
+
